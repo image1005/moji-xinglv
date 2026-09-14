@@ -14,7 +14,7 @@
 以工作区对话与 AI 对话，生成、修改、保存行程 JSON；版本可回滚
 视觉语言为宣纸 / 墨 / 朱砂 / 竹青 / 鎏金的东方古典风格
 
-[快速开始](#快速开始) · [功能特性](#功能特性) · [技术栈](#技术栈) · [API 文档](docs/API.md) · [开发文档](docs/DEV.md) · [贡献指南](#贡献指南)
+[快速开始](#快速开始) · [功能特性](#功能特性) · [技术栈](#技术栈) · [API 文档](docs/API.md) · [开发文档](docs/DEV.md) · [贡献指南](#贡献指南) · [Issues](https://github.com/image1005/moji-xinglv/issues) · [Pull requests](https://github.com/image1005/moji-xinglv/pulls)
 
 </div>
 
@@ -208,9 +208,9 @@ bun run scripts/smoke.ts                            # 端到端冒烟（登录 /
 
 ## 贡献指南
 
-欢迎提交 Issue 与 Pull Request。
+欢迎提交 [Issue](https://github.com/image1005/moji-xinglv/issues) 与 [Pull Request](https://github.com/image1005/moji-xinglv/pulls)。仓库地址：https://github.com/image1005/moji-xinglv
 
-1. Fork 本仓库，基于 `main` 新建分支：`feat/xxx`、`fix/xxx`、`docs/xxx`
+1. Fork [本仓库](https://github.com/image1005/moji-xinglv)，基于 `main` 新建分支：`feat/xxx`、`fix/xxx`、`docs/xxx`
 2. 遵循 [docs/DEV.md](docs/DEV.md) 的约定：Bun 是唯一运行时、所有 API 入参用 Zod 校验、所有数据库写入走 Drizzle、Nuxt 脚本保持 `bun --bun`
 3. 提交前确保通过：
 
