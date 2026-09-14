@@ -1,0 +1,176 @@
+/* 国风设计令牌与全局基础样式（硬约束 11） */
+
+:root {
+  --paper: #faf6ee;
+  --paper-deep: #f1eadb;
+  --ink: #2b2b2b;
+  --ink-soft: #5a564e;
+  --ink-faint: #948d7e;
+  --cinnabar: #a63a2f;
+  --bamboo: #4a7264;
+  --gold: #c8a45c;
+  --gold-deep: #9c7a34;
+  --line: #d8cfbb;
+  --line-soft: #e6dfcf;
+  --font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', 'SimSun', 'KaiTi', serif;
+  --font-body: 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --topbar-height: 52px;
+  --sidebar-width: 320px;
+  --row-height: 34px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#__nuxt {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  color: var(--ink);
+  background: var(--paper-deep);
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-serif);
+  font-weight: 600;
+}
+
+a {
+  color: var(--bamboo);
+}
+
+/* 印章式按钮 */
+.btn {
+  font-family: var(--font-body);
+  font-size: 13px;
+  padding: 6px 16px;
+  border-radius: 3px;
+  border: 1px solid var(--ink-soft);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn:hover:not(:disabled) {
+  border-color: var(--cinnabar);
+  color: var(--cinnabar);
+}
+.btn--seal {
+  background: var(--cinnabar);
+  border-color: var(--cinnabar);
+  color: var(--paper);
+}
+.btn--seal:hover:not(:disabled) {
+  color: var(--paper);
+  opacity: 0.88;
+}
+.btn--ghost {
+  background: transparent;
+  border-color: var(--line);
+  color: var(--ink-soft);
+}
+.btn--small {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Markdown 渲染（@nuxtjs/mdc） */
+.mdc {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--ink);
+  word-break: break-word;
+}
+.mdc p {
+  margin: 0.4em 0;
+}
+.mdc h1,
+.mdc h2,
+.mdc h3,
+.mdc h4 {
+  margin: 0.8em 0 0.4em;
+  font-size: 1.05em;
+  color: var(--ink);
+}
+.mdc ul,
+.mdc ol {
+  padding-left: 1.3em;
+  margin: 0.4em 0;
+}
+.mdc li {
+  margin: 0.2em 0;
+}
+.mdc blockquote {
+  margin: 0.6em 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--gold);
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+}
+.mdc code {
+  background: var(--paper-deep);
+  border: 1px solid var(--line-soft);
+  border-radius: 2px;
+  padding: 0 4px;
+  font-size: 0.9em;
+}
+.mdc pre {
+  background: #2f2b26;
+  color: #f1eadb;
+  padding: 10px 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+}
+.mdc pre code {
+  background: none;
+  border: none;
+  color: inherit;
+}
+.mdc table {
+  border-collapse: collapse;
+  margin: 0.6em 0;
+}
+.mdc th,
+.mdc td {
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+  font-size: 13px;
+}
+.mdc img {
+  max-width: 100%;
+  border-radius: 3px;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-faint);
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
