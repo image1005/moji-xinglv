@@ -1,0 +1,1 @@
+ALTER TABLE `plans` ADD `current_version_id` integer;

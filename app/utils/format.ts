@@ -13,7 +13,7 @@ export function formatBytes(bytes: number): string {
 }
 
 export function sourceLabel(source: string): string {
-  return source === 'ai' ? 'AI 编辑' : source === 'rollback' ? '回滚' : '手动保存'
+  return source === 'ai' ? 'AI 编辑' : source === 'rollback' ? '版本切换' : '手动保存'
 }
 
 export function relativeTime(value: string | Date | null | undefined): string {

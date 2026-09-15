@@ -56,6 +56,14 @@ export interface SaveResult {
   preview: PlanPreview
 }
 
+export function apiErrorMessage(error: unknown, fallback = '操作失败，请稍后重试'): string {
+  const value = error as { statusCode?: number; status?: number; data?: { message?: string; statusMessage?: string }; message?: string } | null
+  if (value?.statusCode === 409 || value?.status === 409) {
+    return '版本冲突：规划已被更新，请先重载最新版本再保存。未保存的草稿仍保留。'
+  }
+  return value?.data?.message || value?.data?.statusMessage || value?.message || fallback
+}
+
 export const api = {
   me: () => $fetch<{ user: SessionUser }>('/api/me'),
 
@@ -64,13 +72,21 @@ export const api = {
     create: (body: { title?: string; planJson?: unknown }) =>
       $fetch<{ planId: number; version: number }>('/api/plans', { method: 'POST', body }),
     detail: (id: number) => $fetch<PlanDetail>(`/api/plans/${id}`),
-    updateMeta: (id: number, body: { title?: string; summary?: string; contentMd?: string }) =>
-      $fetch<{ ok: boolean }>(`/api/plans/${id}`, { method: 'PATCH', body }),
+    updateMeta: (id: number, body: {
+      title?: string
+      summary?: string
+      cover?: string
+      tags?: string[]
+      tips?: string[]
+      budget?: Plan['budget']
+      contentMd?: string
+      expectedVersion?: number
+    }) => $fetch<{ ok: boolean }>(`/api/plans/${id}`, { method: 'PATCH', body }),
     remove: (id: number) => $fetch<{ ok: boolean }>(`/api/plans/${id}`, { method: 'DELETE' }),
-    save: (id: number, body: { planJson?: unknown; conversationId?: number }) =>
+    save: (id: number, body: { planJson?: unknown; conversationId?: number; expectedVersion?: number }) =>
       $fetch<SaveResult>(`/api/plans/${id}/save`, { method: 'POST', body }),
-    rollback: (id: number, body: { version: number; conversationId?: number }) =>
-      $fetch<{ version: number; preview: PlanPreview }>(`/api/plans/${id}/rollback`, {
+    switchVersion: (id: number, body: { version: number; conversationId?: number; expectedVersion?: number }) =>
+      $fetch<{ version: number; versionId: number; switched: true; preview: PlanPreview }>(`/api/plans/${id}/switch`, {
         method: 'POST',
         body,
       }),

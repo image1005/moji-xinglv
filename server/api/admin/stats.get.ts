@@ -24,7 +24,7 @@ export default defineEventHandler(async (event) => {
     baidu: {
       panoramaImages: Number(panoramaCount?.c ?? 0),
       staticMaps: cacheByType.image ?? 0,
-      poiQueries: cacheByType.json ?? 0,
+      poiQueries: 0,
     },
   }
 })

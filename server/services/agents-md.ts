@@ -1,6 +1,8 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
+import { createError } from 'h3'
 import { agentsMd } from '../database/schema'
 import { db } from '../utils/db'
+import { getPlanRow } from './plan'
 
 /**
  * AGENTS.md 注入（硬约束 8）：plan 级 > user 级 > 系统默认；
@@ -35,31 +37,38 @@ export async function resolveAgentsMd(
   planId: number | null,
   vars: Record<string, string> = {},
 ): Promise<string> {
+  if (planId !== null) await getPlanRow(userId, planId)
   const rows = await db.select().from(agentsMd).where(eq(agentsMd.userId, userId))
-  const planLevel = planId ? rows.find((r) => r.planId === planId) : undefined
-  const userLevel = rows.find((r) => r.planId === null)
+  const planLevel = rows.find((r) => r.planId === planId && planId !== null && r.content)
+  const userLevel = rows.find((r) => r.planId === null && r.content)
   const template = planLevel?.content || userLevel?.content || DEFAULT_AGENTS_MD
   const label = planLevel ? '计划级' : userLevel ? '用户级' : '系统默认'
-  return `# 用户偏好（来源：${label} AGENTS.md）\n${renderAgentsMd(sanitizeAgentsMd(template), vars)}`
+  return `# 用户偏好（来源：${label} AGENTS.md）\n${sanitizeAgentsMd(renderAgentsMd(template, vars))}`
+}
+
+function scope(userId: string, planId: number | null) {
+  return and(eq(agentsMd.userId, userId), planId === null ? isNull(agentsMd.planId) : eq(agentsMd.planId, planId))
 }
 
 export async function getAgentsMd(userId: string, planId: number | null) {
-  const rows = await db.select().from(agentsMd).where(eq(agentsMd.userId, userId)).all()
-  return rows.find((r) => r.planId === planId) ?? null
+  if (planId !== null) await getPlanRow(userId, planId)
+  return db.select().from(agentsMd).where(scope(userId, planId)).get() ?? null
 }
 
 export async function saveAgentsMd(userId: string, planId: number | null, content: string) {
-  const clean = sanitizeAgentsMd(content).slice(0, AGENTS_MD_MAX_LENGTH)
-  const existing = (
-    await db.select().from(agentsMd).where(eq(agentsMd.userId, userId)).all()
-  ).find((r) => r.planId === planId)
-  if (existing) {
-    await db
-      .update(agentsMd)
-      .set({ content: clean, version: existing.version + 1, updatedAt: new Date() })
-      .where(eq(agentsMd.id, existing.id))
-    return { id: existing.id, version: existing.version + 1 }
+  if (planId !== null) await getPlanRow(userId, planId)
+  if (content.length > AGENTS_MD_MAX_LENGTH) {
+    throw createError({ statusCode: 400, statusMessage: `AGENTS.md 不得超过 ${AGENTS_MD_MAX_LENGTH} 字符` })
   }
-  const [row] = await db.insert(agentsMd).values({ userId, planId, content: clean }).returning()
-  return { id: row!.id, version: row!.version }
+  const clean = sanitizeAgentsMd(content)
+  return db.transaction((tx) => {
+    const existing = tx.select().from(agentsMd).where(scope(userId, planId)).get()
+    if (existing) {
+      tx.update(agentsMd).set({ content: clean, version: existing.version + 1, updatedAt: new Date() })
+        .where(eq(agentsMd.id, existing.id)).run()
+      return { id: existing.id, version: existing.version + 1 }
+    }
+    const row = tx.insert(agentsMd).values({ userId, planId, content: clean }).returning().get()
+    return { id: row.id, version: row.version }
+  }, { behavior: 'immediate' })
 }

@@ -22,6 +22,8 @@ export const plans = sqliteTable(
     contentMd: text('content_md').notNull().default(''),
     planJson: text('plan_json', { mode: 'json' }).notNull(),
     coverUrl: text('cover_url').notNull().default(''),
+    /** 当前版本指针（plan_versions.id）；切换历史版本只改指针，不新建版本。 */
+    currentVersionId: integer('current_version_id'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
       .notNull()

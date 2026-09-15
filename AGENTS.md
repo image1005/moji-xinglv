@@ -46,7 +46,7 @@ Nuxt 4 + Bun 全栈项目：AI 旅游行程规划工作台，dsh 式**两栏**�
 app/                       # Nuxt 4 前端
   pages/                   # / 工作台、/login、/admin/**
   components/              # WorkspaceSidebar（工作区文件夹树）、MainPanel（模式路由）、
-                           # ConversationView（对话/轨迹）、PlanWorkspaceView（行程/地图/街景/JSON/AGENTS.md）、
+                           # ConversationView（对话/版本路线）、PlanWorkspaceView（行程/地图/食记/街景/偏好）、
                            # SettingsView、ChatMessage/PreviewCard/ToolCallCard、国风组件与 AppIcon
   composables/             # useWorkspace（工作区/会话/消息/版本单例）、useCurrentUser
   utils/idb.ts             # IndexedDB 缓存（街景 Blob、plan JSON，TTL + LRU）
@@ -68,9 +68,9 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 
 1. 百度 AK 仅服务端：只允许 `server/services/baidu.ts` 读 `BAIDU_MAP_AK`；只代理 `staticimage/v2`（markers/paths 画路线）与 `panorama/v2`；禁止引入百度 JS API GL、禁止浏览器端 AK（已决策，见 PRD）
 2. 缓存优先：请求百度前必须先查前端 IndexedDB → 后端 `cache` 表 / Nitro storage（`key = hash(api + params)`，校验 `expires_at`）；未命中才请求并写回（内存 + DB）
-3. AI 只产出结构化 patch（工具返回值经 Zod 校验）；服务端校验后合并生成新版本；禁止用 AI 文本整体覆盖 `plan_json`
+3. AI 只产出结构化编辑（工具返回值经 Zod 校验）；服务端校验后合并生成新版本；禁止用 AI 文本整体覆盖 `plan_json`。优先 `apply_plan_edits` 原子操作，`patch_plan_json` 仅兜底，不向 AI 暴露全量覆盖工具。行程 JSON 为严格契约：未知字段必须 400 拒绝并给出改名提示（如 `stay → lodging`），禁止静默丢弃；界面不提供 JSON 源码编辑，全部走可视化表单
 4. 工具作用域：每个 tool 必须接收并校验当前 `plan_id`，禁止跨规划读写
-5. 版本只追加不删除：`plan_versions` 含 `version`（自增）、`parent_version_id`、`source = ai|user|rollback`、`diff_json`、`message_id`；Undo = 基于目标版本新建版本 + 聊天流插入系统消息
+5. 版本只追加不删除：`plan_versions` 含 `version`（自增）、`parent_version_id`、`source`、`diff_json`、`message_id`；Undo（切换版本）= 移动 `plans.current_version_id` 指针直接使用目标版本 + 聊天流插入系统消息，不新建版本；之后继续编辑以当前版本为父分叉
 6. 每次 AI 编辑后，聊天流必须插入可视化预览卡片（摘要 / 每日安排 / 街景缩略图；可展开、复制、保存、Diff）
 7. 会话持久化：conversation 绑定 `plan_id`；messages 存 role / content / tool_calls / preview_json / plan_version_id；刷新或换设备后可恢复完整会话
 8. AGENTS.md 注入：优先级 plan 级 > user 级 > 系统默认；支持 `{{nickname}}`、`{{currency}}` 等占位符；长度上限 + 防注入过滤；在服务端拼装 system prompt
@@ -78,7 +78,8 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 10. 密钥仅存 `.env`；保持 `.env.example` 同步；前端 bundle 不得出现 `BAIDU_MAP_AK`、`AUTH_SECRET`
 11. 国风视觉：宣纸底 / 墨 / 朱砂 / 竹青 / 鎏金，宋楷标题，印章式按钮，克制圆角；移动端左侧栏折叠为抽屉
 12. 新 API 必须有 Zod 校验（入参用 `readValidatedBody` / `getValidatedQuery` 以返回 400）；新表必须走 migration；所有 DB 操作走 Drizzle
-13. 工作区模型：工作区 = 规划；每个会话必须绑定 `plan_id`；左栏为可折叠工作区文件夹（顶部「规划预览与编辑」入口 + 会话列表）；中间主区在「对话/轨迹」与「规划预览与编辑」之间切换，不再有独立右栏
+13. 工作区模型：工作区 = 规划；每个会话必须绑定 `plan_id`；左栏为可折叠工作区文件夹（顶部「规划预览与编辑」入口 + 会话列表）；中间主区在「对话/版本路线」与「规划预览与编辑」之间切换，不再有独立右栏
+14. AI 编辑以工具驱动（ReAct 多步循环），不强制读后写顺序；一轮对话（同一 `assistantMessageId`）只保留一个版本：仍是当前版本时原地更新，指针移动或换轮后追加
 
 ## 环境变量（.env，保持 .env.example 同步）
 

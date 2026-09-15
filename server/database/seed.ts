@@ -1,13 +1,14 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, isNull } from 'drizzle-orm'
 import { PlanSchema } from '../../shared/schemas/plan'
+import { createPlan } from '../services/plan'
 import { auth } from '../utils/auth'
 import { db } from '../utils/db'
-import { agentsMd, planVersions, plans, user } from './schema'
+import { readSeedAdminEnv } from '../utils/env'
+import { agentsMd, plans, user } from './schema'
 
 /** 种子数据：初始 admin 账号 + 示例规划 + 默认全局 AGENTS.md（需先 db:migrate） */
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL ?? 'admin@example.com'
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD ?? 'admin123456'
+const { email: ADMIN_EMAIL, password: ADMIN_PASSWORD } = readSeedAdminEnv()
 
 const DEFAULT_AGENTS_MD = `# 全局偏好（AGENTS.md 示例）
 
@@ -19,19 +20,21 @@ const DEFAULT_AGENTS_MD = `# 全局偏好（AGENTS.md 示例）
 - 语言风格：简洁克制，先给结构化行程，再补充必要说明
 `
 
-async function seed() {
+export async function seed() {
   let [admin] = await db.select().from(user).where(eq(user.email, ADMIN_EMAIL))
   if (!admin) {
     await auth.api.signUpEmail({
       body: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD, name: '管理员' },
     })
-    await db.update(user).set({ role: 'admin' }).where(eq(user.email, ADMIN_EMAIL))
     ;[admin] = await db.select().from(user).where(eq(user.email, ADMIN_EMAIL))
-    console.log(`[db:seed] admin 已创建：${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`)
+    console.log('[db:seed] admin 已创建（密码不输出，请查看种子配置）')
   } else {
-    console.log(`[db:seed] admin 已存在：${ADMIN_EMAIL}`)
+    console.log('[db:seed] admin 已存在，保留现有密码')
   }
   if (!admin) throw new Error('[db:seed] admin 创建失败')
+  if (admin.role !== 'admin') {
+    await db.update(user).set({ role: 'admin' }).where(eq(user.id, admin.id))
+  }
 
   const existingPlans = await db.select().from(plans).where(eq(plans.userId, admin.id))
   if (existingPlans.length === 0) {
@@ -67,29 +70,15 @@ async function seed() {
       budget: { total: 3200, currency: 'CNY', breakdown: { 交通: 800, 住宿: 1200, 餐饮: 700, 门票: 500 } },
       tags: ['江南', '人文', '慢旅行'],
     })
-    const [plan] = await db
-      .insert(plans)
-      .values({
-        userId: admin.id,
-        title: planJson.title,
-        summary: planJson.summary,
-        contentMd: `# ${planJson.title}\n\n${planJson.summary}\n`,
-        planJson,
-        coverUrl: planJson.cover,
-      })
-      .returning()
-    await db.insert(planVersions).values({
-      planId: plan!.id,
-      version: 1,
-      planJson,
-      createdBy: admin.id,
+    const plan = await createPlan(admin.id, planJson, {
       source: 'user',
-      diffJson: null,
+      contentMd: `# ${planJson.title}\n\n${planJson.summary}\n`,
     })
-    console.log(`[db:seed] 示例规划 #${plan!.id} 已创建`)
+    console.log(`[db:seed] 示例规划 #${plan.planId} 已创建`)
   }
 
-  const existingMd = await db.select().from(agentsMd).where(eq(agentsMd.userId, admin.id))
+  const existingMd = await db.select().from(agentsMd)
+    .where(and(eq(agentsMd.userId, admin.id), isNull(agentsMd.planId)))
   if (existingMd.length === 0) {
     await db.insert(agentsMd).values({ userId: admin.id, planId: null, content: DEFAULT_AGENTS_MD })
     console.log('[db:seed] 默认全局 AGENTS.md 已创建')
@@ -98,5 +87,7 @@ async function seed() {
   console.log('[db:seed] 完成')
 }
 
-await seed()
-process.exit(0)
+if (import.meta.main) {
+  await seed()
+  process.exit(0)
+}

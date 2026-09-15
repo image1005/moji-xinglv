@@ -79,7 +79,7 @@ async function logout() {
 <template>
   <div class="admin">
     <header class="admin__topbar">
-      <div class="admin__brand"><span class="admin__seal">墨</span> 后台管理</div>
+      <div class="admin__brand"><span class="admin__seal">山</span> 山海行笺 · 管理后台</div>
       <div class="admin__topbar-right">
         <NuxtLink to="/" class="admin__link">返回工作台</NuxtLink>
         <span class="admin__user">{{ user?.email }}</span>
@@ -103,9 +103,9 @@ async function logout() {
         <div class="stat-card"><span class="stat-card__value">{{ stats.messages }}</span><span class="stat-card__label">消息</span></div>
         <div class="stat-card"><span class="stat-card__value">{{ stats.cache.total }}</span><span class="stat-card__label">缓存条目</span></div>
         <div class="stat-card"><span class="stat-card__value">{{ formatBytes(stats.cache.bytes) }}</span><span class="stat-card__label">缓存体积</span></div>
-        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.panoramaImages }}</span><span class="stat-card__label">街景图片</span></div>
-        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.staticMaps }}</span><span class="stat-card__label">静态地图</span></div>
-        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.poiQueries }}</span><span class="stat-card__label">POI 检索</span></div>
+        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.panoramaImages }}</span><span class="stat-card__label">历史街景存档</span></div>
+        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.staticMaps }}</span><span class="stat-card__label">地图 / 街景缓存</span></div>
+        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.poiQueries }}</span><span class="stat-card__label">外部地点搜索（未启用）</span></div>
       </section>
 
       <section v-if="tab === 'users'" class="admin__table-wrap">
@@ -190,8 +190,9 @@ async function logout() {
   align-items: center;
   justify-content: space-between;
   padding: 0 20px;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--paper);
+  color: var(--ink);
+  border-bottom: 1px solid var(--line);
 }
 .admin__brand {
   font-family: var(--font-serif);
@@ -205,6 +206,7 @@ async function logout() {
   width: 24px;
   height: 24px;
   background: var(--cinnabar);
+  color: var(--paper-white);
   border-radius: 3px;
   display: inline-flex;
   align-items: center;
@@ -218,12 +220,12 @@ async function logout() {
 }
 .admin__user {
   font-size: 12px;
-  color: rgba(247, 243, 234, 0.6);
+  color: var(--ink-faint);
 }
 .admin__link {
   background: none;
-  border: 1px solid rgba(247, 243, 234, 0.3);
-  color: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
   font-size: 12px;
   padding: 3px 10px;
   border-radius: 3px;

@@ -12,6 +12,18 @@ type IconName =
   | 'back'
   | 'send'
   | 'stop'
+  | 'close'
+  | 'book'
+  | 'mountain'
+  | 'compass'
+  | 'leaf'
+  | 'bowl'
+  | 'calendar'
+  | 'pin'
+  | 'check'
+  | 'arrow'
+  | 'spark'
+  | 'wallet'
 
 const props = defineProps<{ name: IconName; size?: number }>()
 
@@ -28,6 +40,18 @@ const PATHS: Record<IconName, string> = {
   back: 'M10 3 5 8l5 5',
   send: 'M8 13.5V3M4 7l4-4 4 4',
   stop: 'M5 5h6v6H5z',
+  close: 'M4 4l8 8M12 4l-8 8',
+  book: 'M8 4c-2-1.5-4-1.5-6-1v10c2-.5 4-.5 6 1 2-1.5 4-1.5 6-1V3c-2-.5-4-.5-6 1Zm0 0v10M4 6h1M11 6h1',
+  mountain: 'M1 13 6 4l3 5 2-3 4 7H1ZM4.5 7l1.5 1 1.5-1M10 2h.01',
+  compass: 'M8 14a6 6 0 1 0 0-12 6 6 0 0 0 0 12Zm2.5-8.5L9 9l-3.5 1.5L7 7l3.5-1.5Z',
+  leaf: 'M3 12C-1 5 6 2 14 2c0 8-3 13-9 10M2 14l8-8',
+  bowl: 'M2 7h12c-.3 4-2.5 6-6 6s-5.7-2-6-6ZM5 14h6M6 2c-1 1 1 2 0 3M10 1c-1 1 1 2 0 3',
+  calendar: 'M2.5 4h11v10h-11ZM5 2v4M11 2v4M2.5 7h11M5 10h1M9 10h1',
+  pin: 'M12.5 6.5C12.5 10 8 14 8 14S3.5 10 3.5 6.5a4.5 4.5 0 0 1 9 0Zm-3 0a1.5 1.5 0 1 0-3 0 1.5 1.5 0 0 0 3 0Z',
+  check: 'M3 8l3 3 7-7',
+  arrow: 'M2 8h11M9 4l4 4-4 4',
+  spark: 'm8 2 1.5 4.5L14 8l-4.5 1.5L8 14 6.5 9.5 2 8l4.5-1.5L8 2Z',
+  wallet: 'M3 3h10v3M13 4H2v10h12V6H2M10 8h4v3h-4V8Z',
 }
 </script>
 

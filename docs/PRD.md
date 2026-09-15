@@ -1,4 +1,4 @@
-# PRD — 国风旅游行程规划智能体
+# PRD — 山海行笺 · 国风旅游行程规划智能体
 
 > 本文件是项目的完整需求规格。AGENTS.md 是精简执行约束；两者冲突时，以本文件「0. 已裁决事项」为准。
 
@@ -8,17 +8,21 @@
    - 集成方式：catch-all 路由 `server/api/auth/[...all].ts`；`/admin/**` 的 `routeRules` 式守卫以 `server/middleware/admin-guard.ts` 等价实现，并在 API 层用 `requireAdmin` 双重校验。
    - 表结构以 better-auth 规范为准：`user` / `session` / `account` / `verification`（`server/database/auth-schema.ts` 由 Better Auth CLI 生成，勿手改）。
    - **覆盖**第 4 节中 `users` / `sessions` 的简表设计；密码哈希存于 `account` 表（credential provider），不在 `users.password_hash`。
-   - 初始 admin 账号由 `db:seed` 创建（默认 `admin@example.com` / `admin123456`）。
+   - 初始 admin 账号由 `db:seed` 创建，邮箱和密码通过 `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` 显式配置；登录页与文档不公开默认密码。
 2. **地图/街景全部服务端代理，不引入百度 JS API GL**：后端代理 `staticimage/v2`（支持 `markers`、`paths` 绘制路线）与 `panorama/v2`（需 "for server" 类型 AK），前端只消费后端图片 URL。
    - 满足验收标准「百度 AK 不出现在前端」；代价是地图不可缩放拖动（静态图）。
    - **覆盖**技术栈中「百度地图 JS API GL」的表述；禁止引入浏览器端 AK。
 3. **DB 单一写入者 = Drizzle**：所有写入（含 better-auth 通过 drizzle adapter）走同一 `bun:sqlite` 连接；Mastra 不接 SQLite 存储（避免双写与锁冲突），会话历史由 `messages` 表持久化并显式传给 Agent。
 4. **AI SDK 版本对齐**：`ai` / `@ai-sdk/vue` 必须与 `@mastra/ai-sdk` 支持的 v5 消息协议一致（`handleChatStream` + `toAISdkV5Messages`）；升级 major 前必须跑通完整对话流。
-5. **运行时约束**：Nuxt 脚本经 `bun --bun` 执行（`bun:sqlite` 依赖 Bun 运行时）；端到端验收用 `bun run scripts/smoke.ts`（需先 `bun dev`）。
-6. **UI 采用 dsh 式工作区模型（两栏）**：左栏为可折叠的「工作区（= 规划）」文件夹树——顶部「新会话」，文件夹内第一项为「规划预览与编辑」，其下是该工作区的会话；中间主区在「对话 / 轨迹」与「规划预览与编辑（行程 / 地图 / 街景 / JSON / AGENTS.md）」之间切换，另有「设置」视图（全局 AGENTS.md、账号、退出）。
+5. **运行时约束**：Bun ≥ 1.3，Nuxt 脚本（含 prepare/typecheck）经 `bun --bun` 执行（`bun:sqlite` 依赖 Bun 运行时）；质量入口为 `bun run check`。端到端冒烟用 `bun run smoke`，仅对已启动的独立测试环境使用显式凭据执行，不得用真实业务数据库。
+6. **UI 采用 dsh 式工作区模型（两栏）**：左栏为可折叠的「工作区（= 规划）」文件夹树——顶部「新会话」，文件夹内第一项为「规划预览与编辑」，其下是该工作区的会话；中间主区在「对话 / 版本路线」与「规划预览与编辑（行程总览 / 路线舆图 / 风物食记 / 沿途街景 / 旅行偏好）」之间切换，另有「设置」视图（全局 AGENTS.md、账号、退出）；不提供 JSON 源码编辑，编辑全部走可视化表单与结构化 patch。
    - **覆盖**第 3.1 节的三栏布局与独立右侧栏设计；视觉保持国风浅色，仅参考 dsh 的布局与比例。
    - 会话必须归属工作区（`conversations.plan_id` NOT NULL），不实现「未分组」区。
 7. **SSR 兼容**：`nuxt.config.ts` 保留 `vite.ssr.noExternal: ['zod']`——`shared/` 目录经 Vite 优化后，SSR 下会丢失 zod 命名导出（报 `z.object` undefined）。
+8. **山海行笺数据扩展**：`foodJournal` 美食手账与 `checklist` 出行清单均默认空数组；景点增加地址、类别、停留时长与花费。未知经纬度同时为 `null`，不得由 AI 编造，允许人工补全；历史 JSON 用 schema 默认值兼容，不破坏已有数据。
+9. **乐观锁与事务**：保存、切换版本与 AI 编辑校验 `expectedVersion`；过期版本返回 409，不静默覆盖。规划快照与递增版本保持事务一致，参数/作用域错误在写入前拒绝。当前 API 的 `expectedVersion` 为可选非负整数，指「当前版本号」（切换后可能为较早版本），应用客户端必须发送；关联系统消息在版本事务成功后追加，尚不保证消息失败撤销版本，验收须区分此边界。AI 仅提交结构化 patch，不开放全量覆盖工具。**切换版本只移动 `plans.current_version_id` 指针，直接使用目标版本，不新建版本**。
+10. **本地地点与路线边界**：POI / `search_poi` 仅检索当前用户当前规划的已有景点，不调用在线地点搜索或地理编码。静态图只绘制每日景点顺序连线，不是导航，不给出道路路线、距离或预计用时。无 AK / 无坐标时显示说明，不影响手工编辑；百度 secret 仍仅在服务端 service 读取。
+11. **验收真实性**：CI 使用冻结锁文件的 Bun 安装、`bun run check` 与构建，测试凭据为 dummy，不依赖真实 AI / 百度。smoke 仅写本次临时规划与会话，finally 清理，不注册持久用户或改偏好；默认只接受 localhost/127.0.0.1，远端必须显式授权。验收结论以本次实际命令结果报告为准，不沿用历史「全绿」声明。
 
 ## 1. 目标
 
@@ -41,23 +45,26 @@
 
 ## 3. 核心功能
 
-### 3.1 三栏聊天工作台
+### 3.1 聊天工作台
 
-- 左栏：规划列表 + 会话列表（可折叠）
-- 中栏：AI 对话与 JSON 预览
-- 右栏：行程详情 / 地图 / 街景 / JSON 源码 / AGENTS.md（Tab 切换）
+> 布局以裁决 6 为准：两栏工作区模型，主区在对话与规划预览编辑之间切换。
+
+- 左栏：工作区文件夹（= 规划）+ 会话列表（可折叠）
+- 主区：AI 对话 / 版本路线 ⇄ 规划预览与编辑（行程总览 / 路线舆图 / 风物食记 / 沿途街景 / 旅行偏好）
+- 不提供 JSON 源码编辑：JSON 仅作为存储与契约，编辑全部走可视化表单与结构化 patch
 
 ### 3.2 AI 对话
 
 - 支持流式输出
-- AI 可调用 Mastra Tools 读取、创建、修改、保存行程 JSON
-- 工具集：`get_plan`、`create_plan`、`patch_plan_json`、`update_plan_json`、`get_panorama`、`search_poi`、`save_plan`
+- AI 可调用 Mastra Tools 读取与编辑行程 JSON（多步工具循环，无强制先读顺序）
+- 工具集以当前规划作用域内的 `get_plan`、`apply_plan_edits`（原子操作）、`patch_plan_json`（兜底）、街景与本地 `search_poi` 为限；不向 AI 暴露全量覆盖工具，新增规划由明确的工作区创建操作完成
+- 一轮对话只保留一个版本：同一 `assistantMessageId` 仍是当前版本时原地更新，指针移动或换轮后以当前版本为父追加
 
-### 3.3 JSON 编辑
+### 3.3 可视化编辑与 JSON 契约
 
-- 定义 Zod Schema
-- AI 只返回结构化 patch
-- 服务端校验后合并，生成新版本
+- 定义 Zod Schema（严格模式：未知字段返回 400 并给出改名建议，不静默丢弃）
+- AI 只返回结构化 patch；服务端校验后合并，生成新版本
+- 界面不提供 JSON 源码编辑：行程资料、路线与景点、风物食记、出行清单均在可视化表单中编辑
 
 ### 3.4 预览输出
 
@@ -68,8 +75,8 @@
 ### 3.5 保存与版本
 
 - 聊天下方「保存」按钮将当前 JSON 保存为规划
-- `plan_versions` 表保存历史版本，支持回滚
-- 每次 AI 编辑或用户手动保存，都生成一个 `plan_version`（递增版本号 + diff + 来源）
+- `plan_versions` 表保存历史版本，支持版本切换
+- AI 编辑或有内容变化的手工保存生成 `plan_version`（递增版本号 + diff + 来源）；无变化保存返回 `skipped: true`，但仍检查 `expectedVersion`。切换版本直接使用目标版本（只移动当前版本指针，不新建、不删除历史）。
 
 ### 3.6 我的规划
 
@@ -91,6 +98,8 @@
 - 获取目标地点街景图片
 - 后端统一代理百度 API，AK 不暴露前端
 - 仅使用：`staticimage/v2`（markers/paths）、`panorama/v2`
+- POI 仅检索当前规划已有景点，不接在线搜索；未知坐标为 `null`，提示人工补全
+- 每日连线仅示意访问顺序，不是导航；无 key 时优雅提示，其余功能正常使用
 
 ### 3.10 缓存策略
 
@@ -124,9 +133,15 @@
 
 ### 3.14 JSON 历史版本与 Undo
 
-- 每条 assistant 回复下方显示版本徽标（如 v7）与操作：查看 diff、Undo 到此版本、复制 JSON、恢复为新分支
-- Undo 会基于目标版本创建「新版本」（不回删历史），并在聊天流插入一条系统消息说明回滚来源
+- 每条 assistant 回复下方显示版本徽标（如 v7）与操作：查看 diff、切换到此版本、复制 JSON
+- Undo 直接切换到目标版本（只移动当前版本指针，不回删历史、不新建版本），并在聊天流插入一条系统消息说明切换；之后继续编辑会以该版本为父分叉出新版本
 - `plan_versions` 表增加字段：`parent_version_id`、`source`（ai/user/rollback）、`diff_json`、`message_id`
+
+### 3.15 美食手账与出行清单
+
+- 美食手账记录想吃 / 已尝、餐厅、城市、地址、日期、餐次、花费、评分、备注与标签，纳入规划 JSON 保存、版本与切换。
+- 出行清单支持条目与完成状态，条目使用唯一 ID；新建与历史规划缺省为空数组。
+- 景点详情支持地址、类别、停留时长与花费；未知坐标不影响文字行程编辑，也不会被当作 `(0,0)` 绘制。
 
 ## 4. 数据模型
 
@@ -142,7 +157,7 @@
 
 ### plans
 
-`id`、`user_id`、`title`、`summary`、`content_md`、`plan_json`、`cover_url`、`created_at`、`updated_at`
+`id`、`user_id`、`title`、`summary`、`content_md`、`plan_json`、`cover_url`、`current_version_id`、`created_at`、`updated_at`
 
 ### plan_versions
 
@@ -180,8 +195,12 @@
     city: string
     spots: Array<{
       name: string
-      lng: number
-      lat: number
+      lng: number | null // 默认 null，未知坐标必须与 lat 同时为空
+      lat: number | null // 默认 null
+      address: string // 默认空串
+      category: 'sight' | 'food' | 'stay' | 'transport' // 默认 sight
+      durationMinutes: number // 默认 60
+      cost: number // 默认 0
       time: string
       notes: string
       imageUrl: string
@@ -194,6 +213,21 @@
   tips: string[]
   budget: { total: number; currency: string; breakdown?: Record<string, number> }
   tags: string[]
+  foodJournal: Array<{ // 默认 []；同数组内 id 唯一
+    id: string
+    name: string
+    restaurant: string // 默认空串
+    city: string
+    address: string
+    date: string
+    meal: 'breakfast' | 'lunch' | 'dinner' | 'snack' // 默认 snack
+    status: 'wishlist' | 'tasted' // 默认 wishlist
+    cost: number // 默认 0
+    rating: number // 0–5，默认 0
+    notes: string
+    tags: string[] // 默认 []
+  }>
+  checklist: Array<{ id: string; text: string; done: boolean }> // 默认 []，done 默认 false，id 唯一
 }
 ```
 
@@ -234,9 +268,9 @@
 - 百度 AK 不出现在前端
 - 同一街景/规划重复请求优先命中缓存，不重复调用百度 API
 - AI 可连续编辑 JSON，每次编辑后聊天流出现预览
-- 规划可保存、排序、编辑、删除、版本回滚
+- 规划可保存、排序、编辑、删除、版本切换
 - 后台账号登录后自动跳转 `/admin`
-- UI 符合国风/古风/复古风格，三栏布局参考 dsh、Codex
+- UI 符合国风/古风/复古风格，采用裁决 6 的两栏工作区布局（覆盖原三栏设计）
 
 ## 10. 本机环境备注
 

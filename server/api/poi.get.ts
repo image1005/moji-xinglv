@@ -1,14 +1,15 @@
 import { z } from 'zod'
-import { searchPoi } from '../services/baidu'
+import { searchPlanPlaces } from '../services/poi'
 import { requireUser } from '../utils/session'
 
 const QuerySchema = z.object({
-  q: z.string().min(1).max(60),
-  region: z.string().min(1).max(30),
+  planId: z.coerce.number().int().positive(),
+  q: z.string().trim().min(1).max(60),
+  region: z.string().max(30).default(''),
 })
 
 export default defineEventHandler(async (event) => {
-  await requireUser(event)
+  const user = await requireUser(event)
   const query = await getValidatedQuery(event, QuerySchema.parse)
-  return { results: await searchPoi(query.q, query.region) }
+  return { results: await searchPlanPlaces(user.id, query.planId, query.q, query.region), source: 'current-plan' }
 })

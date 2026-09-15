@@ -14,21 +14,32 @@ interface LoosePart {
   errorText?: string
 }
 
-const parts = computed(() => props.message.parts as unknown as LoosePart[])
+const parts = computed(() => {
+  const all = props.message.parts as unknown as LoosePart[]
+  const keys = new Set(all.flatMap((part) => {
+    const preview = toolPreview(part)
+    return preview ? [`${preview.planId}:${preview.version}`] : []
+  }))
+  return all.filter((part) => {
+    if (part.type !== 'data-preview' || !part.data) return true
+    const key = `${part.data.planId}:${part.data.version}`
+    if (keys.has(key)) return false
+    keys.add(key)
+    return true
+  })
+})
 const textParts = computed(() => parts.value.filter((p) => p.type === 'text' && p.text))
 const previewParts = computed(() => parts.value.filter((p) => p.type === 'data-preview' && p.data))
 const toolParts = computed(() => parts.value.filter((p) => p.type.startsWith('tool-')))
 const isUser = computed(() => props.message.role === 'user')
 const isSystem = computed(() => props.message.role === 'system')
 
-const EDIT_TOOLS = new Set(['patch_plan_json', 'update_plan_json', 'create_plan', 'save_plan'])
-
 function toolName(part: LoosePart): string {
   return part.type.replace(/^tool-/, '')
 }
 
 function toolPreview(part: LoosePart): PlanPreview | null {
-  if (!EDIT_TOOLS.has(toolName(part))) return null
+  if (!part.type.startsWith('tool-') || part.state !== 'output-available') return null
   const output = part.output as { preview?: PlanPreview } | undefined
   return output?.preview ?? null
 }

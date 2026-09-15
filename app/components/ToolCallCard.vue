@@ -9,10 +9,8 @@ const props = defineProps<{
 
 const LABELS: Record<string, string> = {
   get_plan: '读取行程',
-  create_plan: '创建行程',
+  apply_plan_edits: '编辑行程',
   patch_plan_json: '修改行程',
-  update_plan_json: '重写行程',
-  save_plan: '保存行程',
   get_panorama: '获取街景',
   search_poi: '检索地点',
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlanPreview } from '#shared/types'
-import { api } from '~/utils/api'
+import { api, apiErrorMessage } from '~/utils/api'
 import { sourceLabel } from '~/utils/format'
 
 const props = defineProps<{ preview: PlanPreview }>()
@@ -9,8 +9,10 @@ const ws = useWorkspace()
 const busy = ref(false)
 const copied = ref(false)
 const showDiff = ref(false)
-
-const diff = computed(() => ws.versions.value.find((v) => v.version === props.preview.version)?.diffJson ?? [])
+const failure = ref('')
+const samePlan = computed(() => ws.currentPlan.value?.id === props.preview.planId)
+const currentPlanVersion = computed(() => (samePlan.value ? ws.currentPlan.value?.version : undefined))
+const diff = computed(() => samePlan.value ? ws.versions.value.find((v) => v.version === props.preview.version)?.diffJson ?? [] : [])
 
 const panoramas = computed(() => {
   const spots = props.preview.days
@@ -33,15 +35,16 @@ async function copyJson() {
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
   } catch (error) {
-    console.error(error)
+    failure.value = apiErrorMessage(error, '复制失败，请检查剪贴板权限')
   }
 }
 
 async function undo() {
-  if (busy.value) return
+  if (busy.value || !samePlan.value || preview.version === ws.currentPlan.value?.version) return
+  if (!window.confirm(`切换到 v${props.preview.version}？当前版本将变为 v${props.preview.version}，历史版本仍保留。`)) return
   busy.value = true
   try {
-    await ws.rollback(props.preview.version)
+    await ws.switchVersion(props.preview.version)
   } finally {
     busy.value = false
   }
@@ -72,9 +75,10 @@ async function undo() {
     <div class="preview-card__actions">
       <button class="preview-card__action" @click="copyJson">{{ copied ? '已复制' : '复制 JSON' }}</button>
       <button class="preview-card__action" @click="showDiff = !showDiff">变更 {{ diff.length }} 处</button>
-      <button class="preview-card__action" :disabled="busy" @click="undo">Undo 到此版本</button>
-      <button class="preview-card__action preview-card__action--seal" @click="ws.savePlan()">保存</button>
+      <button class="preview-card__action" :disabled="busy || !samePlan || preview.version === currentPlanVersion" @click="undo">切换到此版本</button>
+      <button class="preview-card__action preview-card__action--seal" :disabled="!samePlan || busy" @click="ws.savePlan()">保存当前规划</button>
     </div>
+    <p v-if="failure" class="feedback" role="alert">{{ failure }}</p>
     <ul v-if="showDiff" class="preview-card__diff">
       <li v-if="!diff.length">与上一版本相比无差异</li>
       <li v-for="(entry, index) in diff.slice(0, 12)" :key="index">

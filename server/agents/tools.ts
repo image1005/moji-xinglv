@@ -1,195 +1,138 @@
 import { createTool } from '@mastra/core/tools'
+import { createError } from 'h3'
 import { z } from 'zod'
 import { PlanSchema } from '../../shared/schemas/plan'
-import { getPanoramaImage, searchPoi } from '../services/baidu'
-import { getLatestVersion, getPlanRow, parsePlanJson, patchPlan, savePlanVersion } from '../services/plan'
-
-/**
- * Mastra 工具集（PRD §3.2）。所有工具都接收并校验 planId，
- * 与当前工作区不一致直接拒绝（硬约束 4：禁止跨规划读写）。
- */
+import { PlanMutationResultSchema } from '../../shared/schemas/preview'
+import { getPanoramaImage } from '../services/baidu'
+import { applyPlanEdits, getPlanSnapshot, patchPlan } from '../services/plan'
+import { searchPlanPlaces } from '../services/poi'
+import { actionableMessage, isAbortError, markActionable } from '../utils/errors'
 
 export interface ToolContext {
-  userId: string
-  planId: number
-  conversationId: number
-  assistantMessageId: number
+  userId: string; planId: number; conversationId: number; assistantMessageId: number
+  signal?: AbortSignal
 }
-
-function ensureScope(ctx: ToolContext, planId: number) {
-  if (planId !== ctx.planId) {
-    throw new Error(`planId 越权：当前工作区为 ${ctx.planId}，收到 ${planId}。请使用当前 planId。`)
-  }
-}
+const scope = z.number().int().positive()
+const mutationOutput = PlanMutationResultSchema
+const editValue = z.record(z.string(), z.unknown())
+const editOp = z.strictObject({
+  target: z.enum(['plan', 'day', 'spot', 'food', 'checklist']),
+  action: z.enum(['add', 'update', 'remove', 'move', 'status', 'toggle']),
+  day: z.number().int().min(0).max(500).optional(),
+  index: z.number().int().min(0).max(1000).optional(),
+  to: z.number().int().min(0).max(1000).optional(),
+  id: z.string().min(1).max(100).optional(),
+  text: z.string().min(1).max(200).optional(),
+  status: z.enum(['wishlist', 'tasted']).optional(),
+  value: editValue.optional(),
+})
 
 export function createPlanTools(ctx: ToolContext) {
+  function ensureScope(planId: number) {
+    ctx.signal?.throwIfAborted()
+    if (planId !== ctx.planId) {
+      throw createError({ statusCode: 400, statusMessage: '工具只能访问当前工作区，请使用当前 planId' })
+    }
+  }
+  /** 只有我们自己产生的 4xx/5xx 文案才透传给用户；未知错误交回上层统一替换。 */
+  async function guard<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run()
+    } catch (error) {
+      if (isAbortError(error)) throw error
+      const message = actionableMessage(error)
+      if (message) throw markActionable(message)
+      throw error
+    }
+  }
   const getPlan = createTool({
-    id: 'get_plan',
-    description: '读取当前工作区的行程 JSON、版本号与标题。任何修改前必须先调用。',
-    inputSchema: z.object({ planId: z.number().int().describe('当前工作区 planId') }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      const row = await getPlanRow(ctx.userId, ctx.planId)
-      const latest = await getLatestVersion(ctx.planId)
-      return {
-        ok: true,
-        planId: ctx.planId,
-        version: latest?.version ?? 0,
-        plan: parsePlanJson(row.planJson),
-      }
-    },
-  })
-
-  const createPlan = createTool({
-    id: 'create_plan',
-    description:
-      '为当前空工作区写入初始行程（仅当工作区尚无景点/行程内容时可用）。已有内容时请改用 patch_plan_json。',
-    inputSchema: z.object({
-      planId: z.number().int(),
-      plan: PlanSchema.describe('完整行程 JSON'),
+    id: 'get_plan', description: '读取当前规划 JSON 与当前版本。编辑前不必读取；仅在版本冲突（409）后需要重读。',
+    inputSchema: z.strictObject({ planId: scope }),
+    outputSchema: z.object({ ok: z.literal(true), planId: scope, version: z.number().int(), plan: PlanSchema }),
+    execute: ({ planId }) => guard(async () => {
+      ensureScope(planId)
+      const { plan, current } = await getPlanSnapshot(ctx.userId, planId)
+      return { ok: true as const, planId, version: current?.version ?? 0, plan }
     }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      const row = await getPlanRow(ctx.userId, ctx.planId)
-      const current = parsePlanJson(row.planJson)
-      if (current.days.some((d) => d.spots.length > 0)) {
-        return { ok: false, message: '当前工作区已有行程内容，请使用 patch_plan_json 增量修改。' }
-      }
-      const result = await savePlanVersion(ctx.userId, ctx.planId, {
-        planJson: input.plan,
-        source: 'ai',
-        messageId: ctx.assistantMessageId,
-        note: 'AI 创建初始行程',
-      })
-      return { ok: true, version: result.version, versionId: result.versionId, preview: result.preview }
-    },
   })
-
-  const patchPlanJson = createTool({
-    id: 'patch_plan_json',
-    description:
-      '对当前行程应用 RFC 7396 Merge Patch：对象递归合并，数组整体替换，字段传 null 表示删除。只提交你确信的字段。',
-    inputSchema: z.object({
-      planId: z.number().int(),
-      patch: z
-        .record(z.string(), z.unknown())
-        .describe('Merge Patch 对象，例如 {"summary":"...","days":[...]}'),
-      reason: z.string().optional().describe('本次修改的简短说明'),
+  const apply = createTool({
+    id: 'apply_plan_edits',
+    description: '原子编辑当前行程：按顺序应用操作数组。每项 { target: plan|day|spot|food|checklist, action: add|update|remove|move|status|toggle, day?, index?, to?, id?, text?, status?, value? }；value 为该对象的部分字段（数组整体替换、null 删除字段）。示例：[{"target":"spot","action":"add","day":0,"value":{"name":"断桥残雪","durationMinutes":90}},{"target":"checklist","action":"add","text":"预约门票"}]。工具直接作用于最新内容，不必先读取；返回版本冲突(409)时先用 get_plan 重读再重试。',
+    inputSchema: z.strictObject({
+      planId: scope,
+      edits: z.array(editOp).min(1).max(30),
+      expectedVersion: z.number().int().nonnegative().optional(),
     }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      const result = await patchPlan(ctx.userId, ctx.planId, input.patch, {
-        source: 'ai',
-        messageId: ctx.assistantMessageId,
+    outputSchema: mutationOutput,
+    execute: (input) => guard(async () => {
+      ensureScope(input.planId)
+      const result = await applyPlanEdits(ctx.userId, ctx.planId, input.edits, {
+        messageId: ctx.assistantMessageId, expectedVersion: input.expectedVersion,
       })
       return {
-        ok: true,
+        ok: true as const,
         version: result.version,
         versionId: result.versionId,
         changed: result.diff.length,
-        reason: input.reason ?? '',
+        skipped: result.skipped,
         preview: result.preview,
       }
-    },
-  })
-
-  const updatePlanJson = createTool({
-    id: 'update_plan_json',
-    description: '用完整行程 JSON 整体覆盖当前工作区（仅在需要整体重写时使用，常规修改优先 patch_plan_json）。',
-    inputSchema: z.object({
-      planId: z.number().int(),
-      plan: PlanSchema.describe('完整行程 JSON'),
-      reason: z.string().optional(),
     }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      const result = await savePlanVersion(ctx.userId, ctx.planId, {
-        planJson: input.plan,
-        source: 'ai',
-        messageId: ctx.assistantMessageId,
-        note: input.reason,
+  })
+  const patch = createTool({
+    id: 'patch_plan_json',
+    description: '兜底工具：仅当 apply_plan_edits 无法表达时使用。提交 RFC7396 增量 patch（对象合并、数组整体替换、null 删除字段）。字段名必须与契约一致：行程顶层 title/summary/cover/days/tips/budget/tags/foodJournal/checklist；days 项 date/city/spots/transport/lodging/meals；景点 name/lng/lat/time/notes/imageUrl/panorama/address/category/durationMinutes(分钟数)/cost；食记 id/name/restaurant/city/address/date/meal/status/cost/rating/notes/tags；清单 id/text/done。自造字段会被服务端拒绝。',
+    inputSchema: z.strictObject({
+      planId: scope,
+      patch: z.record(z.string(), z.unknown()),
+      reason: z.string().max(300).optional(),
+      expectedVersion: z.number().int().nonnegative().optional(),
+    }),
+    outputSchema: mutationOutput,
+    execute: (input) => guard(async () => {
+      ensureScope(input.planId)
+      const result = await patchPlan(ctx.userId, ctx.planId, input.patch, {
+        source: 'ai', messageId: ctx.assistantMessageId, expectedVersion: input.expectedVersion, note: input.reason,
       })
-      return { ok: true, version: result.version, versionId: result.versionId, skipped: result.skipped, preview: result.preview }
-    },
-  })
-
-  const savePlan = createTool({
-    id: 'save_plan',
-    description: '将当前行程另存为新版本（source=user），用于确认落地。内容无变化时不会创建新版本。',
-    inputSchema: z.object({ planId: z.number().int(), note: z.string().optional() }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      const result = await savePlanVersion(ctx.userId, ctx.planId, {
-        source: 'user',
-        messageId: ctx.assistantMessageId,
-        note: input.note,
-      })
-      return { ok: true, version: result.version, versionId: result.versionId, skipped: result.skipped, preview: result.preview }
-    },
-  })
-
-  const getPanorama = createTool({
-    id: 'get_panorama',
-    description:
-      '获取指定坐标的百度街景图片 URL（服务端代理 + 缓存，可直接写入 spot.panorama）。坐标使用百度 BD09。',
-    inputSchema: z.object({
-      planId: z.number().int(),
-      lng: z.number().describe('经度'),
-      lat: z.number().describe('纬度'),
-      heading: z.number().min(0).max(360).optional().describe('水平视角，默认 0'),
-      fov: z.number().min(10).max(360).optional().describe('视野范围，默认 90'),
-    }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      const location = `${input.lng},${input.lat}`
-      const url = `/api/panorama?location=${encodeURIComponent(location)}&width=640&height=360${
-        input.heading !== undefined ? `&heading=${input.heading}` : ''
-      }${input.fov !== undefined ? `&fov=${input.fov}` : ''}`
-      try {
-        await getPanoramaImage({
-          location,
-          width: 640,
-          height: 360,
-          heading: input.heading,
-          fov: input.fov,
-        })
-        return { ok: true, url }
-      } catch (error) {
-        return {
-          ok: false,
-          url,
-          message: `街景暂不可用（${error instanceof Error ? error.message : '未知错误'}），可在 notes 里说明。`,
-        }
+      return {
+        ok: true as const,
+        version: result.version,
+        versionId: result.versionId,
+        changed: result.diff.length,
+        preview: result.preview,
       }
-    },
-  })
-
-  const searchPoiTool = createTool({
-    id: 'search_poi',
-    description: '按关键词在城市范围内检索 POI（返回名称、地址与百度坐标），用于补全景点坐标。',
-    inputSchema: z.object({
-      planId: z.number().int(),
-      query: z.string().min(1).describe('关键词，如「西湖雷峰塔」'),
-      region: z.string().min(1).describe('城市名，如「杭州」'),
     }),
-    execute: async (input) => {
-      ensureScope(ctx, input.planId)
-      try {
-        const results = await searchPoi(input.query, input.region)
-        return { ok: true, results }
-      } catch (error) {
-        return { ok: false, message: error instanceof Error ? error.message : 'POI 检索失败' }
-      }
-    },
   })
-
+  const panorama = createTool({
+    id: 'get_panorama', description: '获取已知 BD09 坐标的街景代理 URL。不得猜测坐标，失败保留空街景。',
+    inputSchema: z.strictObject({ planId: scope, lng: z.number().min(-180).max(180), lat: z.number().min(-90).max(90), heading: z.number().min(0).max(360).optional(), fov: z.number().min(10).max(360).optional() }),
+    outputSchema: z.object({ ok: z.boolean(), url: z.string(), message: z.string().optional() }),
+    execute: ({ planId, lng, lat, heading, fov }) => guard(async () => {
+      ensureScope(planId)
+      await getPlanSnapshot(ctx.userId, planId)
+      const query = new URLSearchParams({ location: `${lng},${lat}`, width: '640', height: '360' })
+      if (heading !== undefined) query.set('heading', String(heading))
+      if (fov !== undefined) query.set('fov', String(fov))
+      try {
+        await getPanoramaImage({ location: `${lng},${lat}`, width: 640, height: 360, heading, fov })
+        return { ok: true, url: `/api/panorama?${query.toString()}` }
+      } catch { return { ok: false, url: '', message: '该位置街景暂不可用，请保留空值并提示用户核实。' } }
+    }),
+  })
+  const places = createTool({
+    id: 'search_poi', description: '仅检索当前规划中已有的已定位地点，不是联网搜索。无结果时坐标保留null，请用户在路线舆图中补全。',
+    inputSchema: z.strictObject({ planId: scope, query: z.string().min(1).max(60), region: z.string().max(30).default('') }),
+    outputSchema: z.object({ ok: z.literal(true), source: z.literal('current-plan'), results: z.array(z.object({ name: z.string(), address: z.string(), lng: z.number(), lat: z.number() })) }),
+    execute: ({ planId, query, region }) => guard(async () => {
+      ensureScope(planId)
+      return { ok: true as const, source: 'current-plan' as const, results: await searchPlanPlaces(ctx.userId, planId, query, region) }
+    }),
+  })
   return {
     get_plan: getPlan,
-    create_plan: createPlan,
-    patch_plan_json: patchPlanJson,
-    update_plan_json: updatePlanJson,
-    save_plan: savePlan,
-    get_panorama: getPanorama,
-    search_poi: searchPoiTool,
+    apply_plan_edits: apply,
+    patch_plan_json: patch,
+    get_panorama: panorama,
+    search_poi: places,
   }
 }

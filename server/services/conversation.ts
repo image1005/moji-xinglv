@@ -8,6 +8,7 @@ import { getPlanRow } from './plan'
 /** 会话与消息持久化（硬约束 7） */
 
 export async function listConversations(userId: string, planId?: number) {
+  if (planId !== undefined) await getPlanRow(userId, planId)
   const where = planId
     ? and(eq(conversations.userId, userId), eq(conversations.planId, planId))
     : eq(conversations.userId, userId)
@@ -58,9 +59,9 @@ export async function listMessages(conversationId: number, limit = 200): Promise
     .select()
     .from(messages)
     .where(eq(messages.conversationId, conversationId))
-    .orderBy(messages.createdAt)
+    .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(limit)
-  return rows.map((r) => ({
+  return rows.reverse().map((r) => ({
     id: r.id,
     conversationId: r.conversationId,
     role: r.role as MessageRole,

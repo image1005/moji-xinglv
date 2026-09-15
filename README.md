@@ -1,17 +1,17 @@
 <div align="center">
 
-# 墨迹行旅
+# 山海行笺
 
 **国风旅游行程规划智能体 —— 与 AI 对话，落笔成行程**
 
 <p>
   <img src="https://img.shields.io/badge/Nuxt-4.5-00DC82?logo=nuxtdotjs&logoColor=white" alt="Nuxt 4">
-  <img src="https://img.shields.io/badge/Bun-%E2%89%A51.4-14151A?logo=bun&logoColor=white" alt="Bun">
+  <img src="https://img.shields.io/badge/Bun-%E2%89%A51.3-14151A?logo=bun&logoColor=white" alt="Bun">
   <img src="https://img.shields.io/badge/Mastra-Agent-6D28D9" alt="Mastra">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License MIT">
 </p>
 
-以工作区对话与 AI 对话，生成、修改、保存行程 JSON；版本可回滚
+以工作区对话与 AI 对话，生成、修改、保存行程 JSON；版本可切换
 视觉语言为宣纸 / 墨 / 朱砂 / 竹青 / 鎏金的东方古典风格
 
 [快速开始](#快速开始) · [功能特性](#功能特性) · [技术栈](#技术栈) · [API 文档](docs/API.md) · [开发文档](docs/DEV.md) · [贡献指南](#贡献指南) · [Issues](https://github.com/image1005/moji-xinglv/issues) · [Pull requests](https://github.com/image1005/moji-xinglv/pulls)
@@ -40,16 +40,21 @@
 
 - 左栏为可折叠的工作区文件夹（工作区 = 规划），支持搜索、按更新时间 / 创建时间排序、新建与删除
 - 每个工作区：顶部「规划预览与编辑」入口 + 该工作区的多个会话（持久化存储，可切换 / 新建 / 删除）
-- 主区在「对话 / 轨迹」与「规划预览与编辑」之间切换；设置视图包含全局 AGENTS.md、账号与退出
+- 主区在「对话 / 版本路线」与「规划预览与编辑」之间切换；设置视图包含全局 AGENTS.md、账号与退出
 - 移动端左侧栏折叠为抽屉
 
 **AI 编辑与版本**
 
-- AI 通过 Mastra 工具读写行程 JSON：`get_plan`、`create_plan`、`patch_plan_json`、`update_plan_json`、`get_panorama`、`search_poi`、`save_plan`
+- AI 通过当前工作区作用域内的 Mastra 工具读取规划、提交原子编辑（`apply_plan_edits`）、兜底 patch、获取街景及检索本地景点；不提供全量覆盖工具
+- 编辑不强制先读取：工具直接作用于最新内容，`expectedVersion` 为可选乐观锁，冲突返回 409 由模型重读重试
 - 只接受结构化 patch（RFC 7396），服务端 Zod 校验后合并生成新版本，禁止用模型文本整体覆盖
-- 聊天流每次编辑插入可视化预览卡片（摘要 / 每日安排 / 街景缩略图，可复制、Diff、Undo）
-- 版本只增不减：`source = ai | user | rollback`；Undo 基于历史版本新建版本并插入系统消息
-- 「轨迹」页签记录工具调用与系统事件时间线
+- 字段契约为严格模式：未知字段返回 400 并给出改名提示（如 `stay → lodging`），不静默丢弃；全部字段在可视化表单中编辑，不提供 JSON 源码编辑
+- 保存与切换版本携带 `expectedVersion` 乐观锁；过期版本返回 409，重新读取后处理冲突，避免多标签页或 AI 与手工编辑互相覆盖
+- 行程新增 `foodJournal` 美食手账与 `checklist` 出行清单（默认空数组）；景点支持地址、类别、停留时长、花费，未知经纬度为 `null`，由用户人工补全
+- 聊天流每次编辑插入可视化预览卡片（摘要 / 每日安排 / 街景缩略图，可复制、Diff、切换版本）
+- 版本只增不减：历史永不删除；「切换到此版本」只移动当前版本指针，之后编辑会从该版本分叉（版本路线图可视化）
+- 一轮对话只保留一个版本：同一轮内的多次原子编辑合并到同一版本，避免版本噪声
+- 「版本路线」页签：以多叉树展示版本脉络，支持缩放、平移与点击节点直接切换当前版本
 
 **账号与后台**
 
@@ -59,7 +64,9 @@
 
 **百度代理与双层缓存**
 
-- 百度能力全部服务端代理：静态路线图 `staticimage/v2`（含标记与每日连线）+ 街景 `panorama/v2`，AK 不进前端
+- 百度能力仅服务端代理静态图 `staticimage/v2`（含标记与每日顺序连线）+ 街景 `panorama/v2`，AK 不进前端
+- 顺序连线不是道路导航，不提供导航路线或预计用时；POI 只在当前规划已有景点中本地检索，不调用在线搜索
+- 未知坐标保持 `null` 并提示人工补全；未配置地图 key 时友好提示，行程 / 美食 / 清单仍可编辑
 - 后端：Nitro storage（L1）+ SQLite `cache` / `panoramas` 表（L2），`key = hash(api + params)`，校验 `expires_at`
 - 前端：IndexedDB 缓存街景 Blob 与 JSON（TTL + LRU），重复查看不再请求百度
 - 响应头 `x-cache: HIT/MISS` 可直接验证缓存命中
@@ -75,11 +82,11 @@
 | --- | --- | --- |
 | 运行时 | Bun | 唯一指定运行时；Nuxt 脚本经 `bun --bun`，生产运行 `bun .output/server/index.mjs` |
 | 框架 | Nuxt 4（Vue 3 + TypeScript strict） | SSR + 文件路由，国风 SCSS |
-| Agent | Mastra | Agent + 7 个工具；按请求注入当前工作区上下文与偏好 |
+| Agent | Mastra | 受限工具集；按请求注入当前工作区上下文与偏好，AI 只提交 patch |
 
 ## 快速开始
 
-前置要求：Bun ≥ 1.4（安装后请**重开终端**使 `bun` 进入 PATH）
+前置要求：Bun ≥ 1.3（安装后请**重开终端**使 `bun` 进入 PATH）
 
 ```powershell
 # 1. 安装 Bun（若未安装）
@@ -91,7 +98,8 @@ bun install
 # 3. 准备环境变量
 Copy-Item .env.example .env
 
-# 4. 初始化数据库与种子数据（含初始管理员）
+# 4. 先在 .env 中设置 AUTH_SECRET、SEED_ADMIN_EMAIL 与 SEED_ADMIN_PASSWORD
+#    再初始化数据库与种子数据（含初始管理员，不使用公开默认密码）
 bun run db:migrate
 bun run db:seed
 
@@ -101,7 +109,7 @@ bun dev
 
 打开 http://localhost:3000：
 
-- 种子管理员 `admin@example.com` / `admin123456`，登录后自动进入 `/admin`
+- 管理员使用自行配置的种子账号登录，登录后自动进入 `/admin`；登录页不公开默认密码
 - 普通账号注册后进入工作台
 - 未配置 `BAIDU_MAP_AK` 时地图 / 街景返回 501；未配置 `AI_API_KEY` 时聊天返回 501，其余功能不受影响
 
@@ -114,9 +122,10 @@ bun dev
 | `bun run db:generate` | drizzle-kit 生成迁移 |
 | `bun run db:migrate` | 应用迁移（`server/database/migrate.ts`） |
 | `bun run db:seed` | 种子数据：admin 账号、示例规划、默认全局 AGENTS.md |
+| `bun run check` | 顺序执行 lint、typecheck、test |
 | `bun run lint` / `bun run typecheck` / `bun run test` | ESLint / vue-tsc / Vitest |
 | `bunx vitest run <file> -t "<name>"` | 运行单个测试 |
-| `bun run scripts/smoke.ts` | 端到端冒烟测试（需先启动 `bun dev`） |
+| `bun run smoke` | 隔离冒烟（别名 `bun run scripts/smoke.ts`；需先启动独立测试环境并显式配置凭据） |
 | `bun run preview:readme` | 以 GitHub 样式本地预览 README（生成 `.preview/readme.html`） |
 
 > **运行时必须是 Bun**：直接用 Node 跑 `nuxt dev` 会报 `Received protocol 'bun:'`
@@ -128,10 +137,14 @@ bun dev
 | --- | --- |
 | `BAIDU_MAP_AK` | 百度服务端 AK；全景需申请 “for server” 类型。仅 `server/services/baidu.ts` 读取 |
 | `AUTH_SECRET` / `BETTER_AUTH_URL` | Better Auth 会话密钥与外部地址 |
+| `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | 显式配置种子管理员；不在页面或文档公开密码 |
+| `SMOKE_EMAIL` / `SMOKE_PASSWORD` | 已有专用测试账号凭据，smoke 无默认值 |
+| `SMOKE_BASE` / `SMOKE_ALLOW_REMOTE` | 默认 `http://localhost:3000`；非 localhost/127.0.0.1 须显式设置 `SMOKE_ALLOW_REMOTE=true` |
+| `SMOKE_TIMEOUT_MS` | 每个请求（包括响应体）的超时，默认 15000ms，范围 1–120000 |
 | `DATABASE_URL` | SQLite 文件路径，形如 `file:./data/app.db` |
 | `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | OpenAI 兼容 LLM（默认 DeepSeek：`https://api.deepseek.com/v1` + `deepseek-chat`） |
 
-以上变量与 `.env.example` 保持同步；密钥只写入 `.env`（已在 `.gitignore` 中忽略）。
+应用配置参考 `.env.example`；smoke 变量仅在专用测试环境中设置。密钥只写入本地 `.env`（已在 `.gitignore` 中忽略）或安全环境变量，不提交账号凭据。
 
 ## 项目结构
 
@@ -159,28 +172,35 @@ LICENSE                    # MIT
 
 - 工作区 = 规划：每个工作区包含一份行程 JSON 与多个会话；会话必须归属某个工作区（无「未分组」）
 - 左栏：可折叠工作区文件夹（搜索 / 排序 / 新建），文件夹内第一项为「规划预览与编辑」，其后为会话列表；底部为「设置」
-- 主区「对话」：流式回复、工具调用卡片、预览卡片（复制 / Diff / Undo / 保存）；底部输入区带保存按钮
-- 主区「轨迹」：工具调用与系统事件时间线
-- 主区「规划预览与编辑」：行程 / 地图 / 街景 / JSON / AGENTS.md 五个页签
+- 主区「对话」：流式回复、工具调用卡片、预览卡片（复制 / Diff / 切换版本 / 保存）；底部输入区带保存按钮
+- 主区「版本路线」：版本多叉树，可缩放平移、点击节点切换当前版本；切换不新建版本
+- 主区「规划预览与编辑」：行程总览 / 路线舆图 / 风物食记 / 沿途街景 / 旅行偏好五个页签；出行清单纳入行程总览，全部字段可视化编辑（不提供 JSON 源码编辑）
 - 设置：全局 AGENTS.md、账号信息、后台入口（admin）、退出登录
 
 ## 测试与验收
 
 ```bash
-bun run lint && bun run typecheck && bun run test   # 代码质量三件套
-bun dev                                             # 另开终端
-bun run scripts/smoke.ts                            # 端到端冒烟（登录 / CRUD / 版本 / 权限 / 降级）
+bun run check       # lint + typecheck + test
+bun run build       # 生产构建
 ```
+
+需要 API 冒烟时，先以**独立测试数据库**启动服务，并显式配置已有测试账号的 `SMOKE_EMAIL` / `SMOKE_PASSWORD`，再执行 `bun run smoke`。不得指向真实业务数据库；默认仅允许 localhost / 127.0.0.1，获授权的远端测试环境须额外设置 `SMOKE_ALLOW_REMOTE=true`。
+
+smoke 只创建带随机标记的临时规划与会话，检查真实内容、默认字段、保存 / 切换版本、400 / 409 与分叉版本链，最后仅删除本次创建的规划并验证级联清理；不注册用户、不改任何偏好、不调用 AI / 百度。每个请求有超时，退出码为 0（通过）、1（检查或清理失败）、2（配置错误）。强制终止或创建响应丢失时需按随机标记人工检查残留。
+
+CI 仅使用 dummy 配置与测试数据库，执行 `bun install --frozen-lockfile`、`bun run check` 和构建，不运行真实服务 smoke。
+
+**以下为验收标准及检查方法，不代表本次已全部验证；结果以本次实际命令的输出报告为准。未运行的浏览器、AI、地图与端到端检查必须单独注明。**
 
 | 验收标准 | 实现 / 验证方式 |
 | --- | --- |
-| `bun install && bun dev` 可运行，`bun run build` 可构建 | 已验证；`bun run scripts/smoke.ts` 全绿 |
-| 百度 AK 不出现在前端 | 仅服务端代理；构建产物已扫描确认无 AK / 密钥值 |
+| `bun install && bun dev` 可运行，`bun run build` 可构建 | 执行检查与构建；独立测试环境另行运行 `bun run smoke`，据实际输出报告 |
+| 百度 AK 不出现在前端 | 仅服务端代理；构建后扫描前端产物，不将设计约束视为已验收 |
 | 重复请求命中缓存，不重复调用百度 | `cache` 表 + `panoramas` 表 + 前端 IndexedDB；响应头 `x-cache: HIT/MISS` |
 | AI 连续编辑 JSON，每次出现预览 | 工具返回 `preview`，聊天流渲染 `PreviewCard`，落库 `messages.preview_json` |
-| 规划可保存 / 排序 / 编辑 / 删除 / 回滚 | 左栏工作区 CRUD + 版本历史 + Undo（只增不减） |
+| 规划可保存 / 排序 / 编辑 / 删除 / 版本切换 | 左栏工作区 CRUD + 版本历史 + 版本路线图（只增不减） |
 | 后台账号登录自动跳转 `/admin` | 登录页按角色跳转；`server/middleware/admin-guard.ts` + API `requireAdmin` 双重校验 |
-| 国风工作区布局（dsh 式两栏） | 可折叠工作区文件夹 + 对话 / 轨迹 + 规划预览编辑，印章按钮，移动端抽屉 |
+| 国风工作区布局（dsh 式两栏） | 可折叠工作区文件夹 + 对话 / 版本路线 + 规划预览编辑，印章按钮，移动端抽屉 |
 
 ## 部署
 
@@ -214,13 +234,13 @@ bun run scripts/smoke.ts                            # 端到端冒烟（登录 /
 3. 提交前确保通过：
 
 ```bash
-bun run lint && bun run typecheck && bun run test
+bun run check
 ```
 
-4. 涉及接口、缓存或对话流的改动，请先启动 `bun dev`，再执行 `bun run scripts/smoke.ts`
+4. 涉及接口或版本逻辑的改动，按「测试与验收」配置独立测试数据库与显式测试凭据后执行 `bun run smoke`；缓存 / 对话流仍需各自实测，smoke 不代替 AI / 百度验收
 5. 提交 PR 时请说明：变更动机、影响范围、验证方式；提交信息建议使用 Conventional Commits（如 `feat: 支持会话重命名`）
 
 
 ## License
 
-[MIT](LICENSE) © 2026 墨迹行旅
+[MIT](LICENSE) © 2026 山海行笺
