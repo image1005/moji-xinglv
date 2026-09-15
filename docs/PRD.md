@@ -14,7 +14,7 @@
    - **覆盖**技术栈中「百度地图 JS API GL」的表述；禁止引入浏览器端 AK。
 3. **DB 单一写入者 = Drizzle**：所有写入（含 better-auth 通过 drizzle adapter）走同一 `bun:sqlite` 连接；Mastra 不接 SQLite 存储（避免双写与锁冲突），会话历史由 `messages` 表持久化并显式传给 Agent。
 4. **AI SDK 版本对齐**：`ai` / `@ai-sdk/vue` 必须与 `@mastra/ai-sdk` 支持的 v5 消息协议一致（`handleChatStream` + `toAISdkV5Messages`）；升级 major 前必须跑通完整对话流。
-5. **运行时约束**：Bun ≥ 1.3，Nuxt 脚本（含 prepare/typecheck）经 `bun --bun` 执行（`bun:sqlite` 依赖 Bun 运行时）；质量入口为 `bun run check`。端到端冒烟用 `bun run smoke`，仅对已启动的独立测试环境使用显式凭据执行，不得用真实业务数据库。
+5. **运行时约束**：Bun ≥ 1.4，Nuxt 脚本（含 prepare/typecheck）经 `bun --bun` 执行（`bun:sqlite` 依赖 Bun 运行时）；质量入口为 `bun run check`。端到端冒烟用 `bun run smoke`，仅对已启动的独立测试环境使用显式凭据执行，不得用真实业务数据库。
 6. **UI 采用 dsh 式工作区模型（两栏）**：左栏为可折叠的「工作区（= 规划）」文件夹树——顶部「新会话」，文件夹内第一项为「规划预览与编辑」，其下是该工作区的会话；中间主区在「对话 / 版本路线」与「规划预览与编辑（行程总览 / 路线舆图 / 风物食记 / 沿途街景 / 旅行偏好）」之间切换，另有「设置」视图（全局 AGENTS.md、账号、退出）；不提供 JSON 源码编辑，编辑全部走可视化表单与结构化 patch。
    - **覆盖**第 3.1 节的三栏布局与独立右侧栏设计；视觉保持国风浅色，仅参考 dsh 的布局与比例。
    - 会话必须归属工作区（`conversations.plan_id` NOT NULL），不实现「未分组」区。

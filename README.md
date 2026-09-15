@@ -6,7 +6,7 @@
 
 <p>
   <img src="https://img.shields.io/badge/Nuxt-4.5-00DC82?logo=nuxtdotjs&logoColor=white" alt="Nuxt 4">
-  <img src="https://img.shields.io/badge/Bun-%E2%89%A51.3-14151A?logo=bun&logoColor=white" alt="Bun">
+  <img src="https://img.shields.io/badge/Bun-%E2%89%A51.4-14151A?logo=bun&logoColor=white" alt="Bun">
   <img src="https://img.shields.io/badge/Mastra-Agent-6D28D9" alt="Mastra">
   <img src="https://img.shields.io/badge/License-MIT-green" alt="License MIT">
 </p>
@@ -86,7 +86,7 @@
 
 ## 快速开始
 
-前置要求：Bun ≥ 1.3（安装后请**重开终端**使 `bun` 进入 PATH）
+前置要求：Bun ≥ 1.4（安装后请**重开终端**使 `bun` 进入 PATH）
 
 ```powershell
 # 1. 安装 Bun（若未安装）

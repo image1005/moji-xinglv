@@ -74,12 +74,12 @@ Nitro（Bun 运行时）
   （输入框、滚动位置、Tab 选择）；`useWorkspace` 按 Nuxt app 实例隔离，不能使用跨 SSR 请求的模块级单例。
   **退出登录必须调用 `resetWorkspace()` + `clearUser()`**，并使在途响应失效，避免旧请求复写换号后的数据。
   切换工作区 / 会话时同样验证请求归属；返回页面后需要新数据时用 `onActivated` + 一次性 guard 刷新（参考 `admin/index.vue`）。
-- **Windows 跨平台**：package scripts 不使用 `rm` / `cp` 等 POSIX 命令；最低 Bun 版本为 1.3。
+- **Windows 跨平台**：package scripts 不使用 `rm` / `cp` 等 POSIX 命令；最低 Bun 版本为 1.4（`bun.lock` 为 lockfileVersion 2）。
 
 ## 测试
 
 - `tests/`：Vitest 单测 + 内联快照（schema、merge patch、diff、缓存键与相关回归）。
-- `bun run check`：依次执行 lint、typecheck、test；另执行 `bun run build`。CI 使用 Bun ≥ 1.3、`bun install --frozen-lockfile`、dummy 配置与独立测试数据库，不使用 npm，不运行真实服务 smoke。
+- `bun run check`：依次执行 lint、typecheck、test；另执行 `bun run build`。CI 使用 Bun ≥ 1.4、`bun install --frozen-lockfile`、dummy 配置与独立测试数据库，不使用 npm，不运行真实服务 smoke。
 - `bun run smoke`（`bun run scripts/smoke.ts` 的别名）：先启动使用独立测试数据库的 `bun dev`，显式提供已有测试账号 `SMOKE_EMAIL` / `SMOKE_PASSWORD`。默认 `SMOKE_BASE=http://localhost:3000`，只允许 localhost / 127.0.0.1；远端必须获授权并设置 `SMOKE_ALLOW_REMOTE=true`。`SMOKE_TIMEOUT_MS` 默认 15000，覆盖请求与响应体读取。
 - smoke 创建随机标记的独立临时规划与会话，断言 schema 默认值、美食 / 清单持久化、真实内容、400 / 409、v1→v2→v3 与系统消息；finally 只删除本次创建的规划，并验证会话级联清理。不注册用户、不修改全局或规划偏好、不请求 AI / 百度。不针对真实业务 DB 执行。
 - smoke 退出码：0 全部通过、1 检查或清理失败、2 配置错误。清理失败会报告本次规划 ID；进程被强制终止或创建响应丢失时仍须人工检查本次随机标记，禁止批量删除其他资源。
