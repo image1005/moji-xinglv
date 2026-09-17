@@ -45,15 +45,65 @@ function onTabKeydown(event: KeyboardEvent, key: TabKey) {
   </section>
 </template>
 
-<style scoped>
-.plan-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.plan-view__tabs { display: flex; align-items: center; gap: 25px; padding: 0 34px; min-height: 56px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; overflow-x: auto; }
-.plan-view__tab { display: flex; align-items: center; gap: 7px; align-self: stretch; flex-shrink: 0; border: none; border-bottom: 2px solid transparent; background: none; padding: 16px 0; font-size: 12px; color: var(--ink-faint); cursor: pointer; white-space: nowrap; }
-.plan-view__tab:hover { color: var(--ink); }
-.plan-view__tab--active { color: var(--cinnabar); border-bottom-color: var(--cinnabar); }
-.plan-view__tab:disabled { opacity: 0.45; }
-.plan-view__body { flex: 1; min-height: 0; overflow-y: auto; padding: 34px 40px 48px; width: 100%; max-width: 1180px; margin: 0 auto; }
+<style lang="scss" scoped>
+@use "~/assets/styles/variables" as *;
+
+.plan-view { flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--bg-page); }
+.plan-view__tabs {
+  display: flex;
+  align-items: center;
+  gap: 25px;
+  padding: 0 34px;
+  min-height: 56px;
+  border-bottom: 1px solid var(--border-secondary);
+  flex-shrink: 0;
+  overflow-x: auto;
+  background: var(--bg-page);
+}
+.plan-view__tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: stretch;
+  flex-shrink: 0;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 16px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all $dur-fast $ease-soft;
+
+  .app-icon {
+    transition: transform $dur-base $ease-spring;
+  }
+
+  &:hover:not(:disabled) {
+    color: var(--text-primary);
+    .app-icon { transform: scale(1.1); }
+  }
+
+  &--active {
+    color: var(--cinnabar);
+    border-bottom-color: var(--cinnabar);
+    font-weight: 500;
+  }
+
+  &:disabled { opacity: 0.45; }
+}
+.plan-view__body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 34px 40px 48px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  animation: rise-in $dur-slow $ease-ink both;
+}
 .plan-view__body > .empty-state { margin-top: 8vh; }
 @media (max-width: 1200px) { .plan-view__tabs { gap: 20px; } .plan-view__body { padding: 28px; } }
-@media (max-width: 640px) { .plan-view__tabs { gap: 22px; padding: 0 20px; min-height: 51px; } .plan-view__tab { font-size: 11px; padding: 14px 0; } .plan-view__body { padding: 23px 18px 36px; } }
+@media (max-width: 640px) { .plan-view__tabs { gap: 22px; padding: 0 20px; min-height: 51px; } .plan-view__tab { font-size: 11.5px; padding: 14px 0; } .plan-view__body { padding: 23px 18px 36px; } }
 </style>

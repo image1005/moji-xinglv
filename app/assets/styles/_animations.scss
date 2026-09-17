@@ -1,0 +1,194 @@
+@use "variables" as *;
+
+// ============ 全局国风动画体系 ============
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes ink-glow {
+  0% { box-shadow: 0 0 0 0 var(--accent-red-subtle); }
+  70% { box-shadow: 0 0 0 6px rgba(172, 77, 60, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(172, 77, 60, 0); }
+}
+
+// 国风双旋环：顺时针旋转
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+// 国风双旋环：逆时针旋转
+@keyframes spin-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+// 印章悬浮轻微呼吸
+@keyframes float {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-5px) scale(1.015); }
+}
+
+// 内容上浮淡入
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// 侧栏横向滑入
+@keyframes slide-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+// 完成态弹性回弹
+@keyframes pop {
+  0% { transform: scale(0.7); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+// 微光掠过
+@keyframes shimmer {
+  0% { background-position: -160% 0; }
+  100% { background-position: 260% 0; }
+}
+
+// 文字逐字波浪律动
+@keyframes wave {
+  0%, 100% { transform: translateY(0); opacity: 0.65; }
+  50% { transform: translateY(-2px); opacity: 1; }
+}
+
+// 头像圆锥流光光环旋转
+@keyframes halo-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+// 模态弹窗上浮微缩放
+@keyframes modal-card-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+// 遮罩淡入
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+// 下拉菜单弹出
+@keyframes dropdown-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+// 徽章弹性入场
+@keyframes badge-in {
+  0% { opacity: 0; transform: scale(0.9); }
+  70% { opacity: 1; transform: scale(1.015); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+// 水墨圆形扩散展开
+@keyframes ink-reveal {
+  from {
+    opacity: 0;
+    clip-path: circle(0% at 50% 50%);
+  }
+  to {
+    opacity: 1;
+    clip-path: circle(75% at 50% 50%);
+  }
+}
+
+// 曲别针/图标趣味摇摆
+@keyframes wiggle {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-12deg); }
+  75% { transform: rotate(12deg); }
+}
+
+// 停止按钮脉冲光环
+@keyframes stop-pulse {
+  0% { box-shadow: 0 0 0 0 var(--accent-red-subtle); }
+  70% { box-shadow: 0 0 0 8px rgba(172, 77, 60, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(172, 77, 60, 0); }
+}
+
+// 输入框生成态流动渐变描边
+@keyframes border-flow {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+// 墨韵打字游标闪烁
+@keyframes ink-cursor-blink {
+  0%, 49% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+// ============ 结构动效类 ============
+
+// 通用折叠展开壳（基于 CSS Grid 0-JS 极速平滑展开，不产生 DOM 计算重排卡顿）
+.collapse-shell {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows $dur-collapse $ease-ink;
+
+  &.collapsed {
+    grid-template-rows: 0fr;
+  }
+
+  > .collapse-inner {
+    overflow: hidden;
+    min-height: 0;
+  }
+}
+
+// Chevron 箭头统一旋转过渡
+.chevron-rotator {
+  transition: transform $dur-base $ease-ink;
+  &.rotated {
+    transform: rotate(-180deg);
+  }
+}
+
+.anim-breathe {
+  animation: breathe 2s ease-in-out infinite;
+}
+
+.anim-float {
+  animation: float 3.2s ease-in-out infinite;
+}
+
+.anim-glow {
+  animation: ink-glow 2.5s infinite;
+}

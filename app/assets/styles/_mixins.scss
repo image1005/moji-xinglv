@@ -1,0 +1,41 @@
+@use "variables" as *;
+
+// 印章双层边框
+@mixin seal-border($color: var(--accent-red)) {
+  border: 1px solid $color;
+  position: relative;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border: 1px solid rgba(172, 77, 60, 0.25);
+    pointer-events: none;
+  }
+}
+
+// 宣纸卡片质感
+@mixin parchment-card {
+  background-color: var(--paper-white);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+  border-radius: 12px;
+  transition: all $transition-base;
+}
+
+// 柔和微边框
+@mixin subtle-ink-border {
+  border: 1px solid var(--line);
+}
+
+@mixin flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+@mixin line-clamp($lines: 1) {
+  display: -webkit-box;
+  -webkit-line-clamp: $lines;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

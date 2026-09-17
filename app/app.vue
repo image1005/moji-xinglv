@@ -1,5 +1,10 @@
 <script setup lang="ts">
 const { user } = useCurrentUser()
+const { initTheme } = useAppTheme()
+
+onMounted(() => {
+  initTheme()
+})
 </script>
 
 <template>

@@ -24,6 +24,9 @@ type IconName =
   | 'arrow'
   | 'spark'
   | 'wallet'
+  | 'sun'
+  | 'moon'
+  | 'sidebar'
 
 const props = defineProps<{ name: IconName; size?: number }>()
 
@@ -52,6 +55,9 @@ const PATHS: Record<IconName, string> = {
   arrow: 'M2 8h11M9 4l4 4-4 4',
   spark: 'm8 2 1.5 4.5L14 8l-4.5 1.5L8 14 6.5 9.5 2 8l4.5-1.5L8 2Z',
   wallet: 'M3 3h10v3M13 4H2v10h12V6H2M10 8h4v3h-4V8Z',
+  sun: 'M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM8 1v2M8 13v2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M1 8h2M13 8h2M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41',
+  moon: 'M13.5 9.8A5.5 5.5 0 0 1 6.2 2.5 5.5 5.5 0 1 0 13.5 9.8Z',
+  sidebar: 'M2 2.5h12a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1v-9a1 1 0 0 1 1-1Zm4 0v11',
 }
 </script>
 

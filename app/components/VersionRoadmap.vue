@@ -229,19 +229,19 @@ async function doSwitch() {
 .roadmap__eyebrow { color: var(--gold-deep); font-size: 10px; letter-spacing: 0.2em; }
 .roadmap__head h3 { margin: 6px 0 0; font-size: 21px; font-weight: 500; letter-spacing: 0.08em; }
 .roadmap__tools { display: flex; align-items: center; gap: 6px; }
-.roadmap__tools button { min-width: 30px; height: 28px; border: 1px solid var(--line); border-radius: 4px; background: var(--paper); color: var(--ink-soft); font-size: 13px; cursor: pointer; }
-.roadmap__tools button:hover:not(:disabled) { border-color: var(--gold); color: var(--cinnabar); }
+.roadmap__tools button { min-width: 30px; height: 28px; border: 1px solid var(--border-primary); border-radius: 6px; background: var(--bg-card); color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all 0.15s ease-out; }
+.roadmap__tools button:hover:not(:disabled) { border-color: var(--gold); color: var(--cinnabar); background: var(--bg-card-muted); }
 .roadmap__tools button:disabled { opacity: 0.45; cursor: not-allowed; }
-.roadmap__zoom { color: var(--ink-faint); font-size: 11px; min-width: 34px; text-align: right; }
-.roadmap__canvas { border: 1px solid var(--line); border-radius: 8px; background: var(--paper-white); height: min(46vh, 420px); overflow: hidden; }
+.roadmap__zoom { color: var(--text-muted); font-size: 11px; min-width: 34px; text-align: right; }
+.roadmap__canvas { border: 1px solid var(--border-primary); border-radius: 10px; background: var(--bg-card); height: min(58vh, 520px); overflow: hidden; box-shadow: var(--shadow-sm); }
 .roadmap__canvas--dragging { cursor: grabbing; }
 .roadmap__svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; user-select: none; }
-.roadmap__edge { fill: none; stroke: var(--line); stroke-width: 1.2; }
+.roadmap__edge { fill: none; stroke: var(--border-primary); stroke-width: 1.2; }
 .roadmap__node { cursor: pointer; }
-.roadmap__node rect { fill: var(--paper); stroke: var(--ink-faint); stroke-width: 1.2; }
-.roadmap__node text { fill: var(--ink); font-family: var(--font-serif); font-size: 13px; }
+.roadmap__node rect { fill: var(--bg-card-muted); stroke: var(--border-primary); stroke-width: 1.2; rx: 4; }
+.roadmap__node text { fill: var(--text-primary); font-family: var(--font-serif); font-size: 13px; }
 .roadmap__node--ai rect { stroke: var(--bamboo); }
-.roadmap__node--user rect { stroke: var(--ink-soft); }
+.roadmap__node--user rect { stroke: var(--text-secondary); }
 .roadmap__node--rollback rect { stroke: var(--gold-deep); }
 .roadmap__node--current rect { stroke: var(--cinnabar); stroke-width: 1.8; fill: var(--cinnabar-soft); }
 .roadmap__node--current text { fill: var(--cinnabar); }
@@ -249,9 +249,9 @@ async function doSwitch() {
 .roadmap__dot { fill: var(--cinnabar); }
 .roadmap__node:focus-visible { outline: none; }
 .roadmap__node:focus-visible rect { stroke: var(--bamboo); stroke-width: 2.4; }
-.roadmap__detail { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--line); border-left: 3px solid var(--cinnabar); border-radius: 5px; background: var(--paper); }
-.roadmap__detail > div { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--ink-soft); }
-.roadmap__detail strong { font-family: var(--font-serif); font-size: 15px; color: var(--cinnabar); }
-.roadmap__note { margin: 0; color: var(--ink-faint); font-size: 11px; line-height: 1.9; }
+.roadmap__detail { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 14px 18px; border: 1px solid var(--border-primary); border-left: 3px solid var(--cinnabar); border-radius: 8px; background: var(--bg-card); box-shadow: var(--shadow-card); }
+.roadmap__detail > div { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-secondary); }
+.roadmap__detail strong { font-family: var(--font-serif); font-size: 15px; color: var(--cinnabar); font-weight: 600; }
+.roadmap__note { margin: 0; color: var(--text-muted); font-size: 11.5px; line-height: 1.8; }
 @media (max-width: 720px) { .roadmap__canvas { height: 300px; } .roadmap__head { align-items: center; } }
 </style>
