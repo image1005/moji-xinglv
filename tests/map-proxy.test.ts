@@ -1,6 +1,7 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }))
+const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn(), metric: vi.fn() }))
+vi.mock('../server/services/metrics', () => ({ recordMetric: mocks.metric }))
 vi.mock('../server/services/cache', () => ({ getCachedBinary: mocks.get, setCachedBinary: mocks.set }))
 const { getPanoramaImage } = await import('../server/services/baidu')
 const input = { location: '116.4,39.9', width: 640, height: 360 }
@@ -19,6 +20,36 @@ describe('百度影像代理安全边界', () => {
     vi.stubGlobal('fetch', fetcher)
     await expect(getPanoramaImage({ ...input, location: '999,99' })).rejects.toThrow()
     expect(fetcher).not.toHaveBeenCalled()
+    expect(mocks.metric).not.toHaveBeenCalled()
+  })
+  it('缺少地图配置不记为外部失败', async () => {
+    vi.stubEnv('BAIDU_MAP_AK', '')
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    await expect(getPanoramaImage(input)).rejects.toMatchObject({ statusCode: 501 })
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(mocks.metric).not.toHaveBeenCalled()
+  })
+  it('本地缓存读取失败不计外部调用', async () => {
+    mocks.get.mockRejectedValueOnce(new Error('cache read failed'))
+    const fetcher = vi.fn()
+    vi.stubGlobal('fetch', fetcher)
+    await expect(getPanoramaImage(input)).rejects.toThrow('cache read failed')
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(mocks.metric).not.toHaveBeenCalled()
+  })
+  it('上游成功但缓存写失败仍只记录一次外部成功', async () => {
+    mocks.set.mockRejectedValueOnce(new Error('cache write failed'))
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(png, { headers: { 'content-type': 'image/png' } })))
+    await expect(getPanoramaImage(input, 'map-owner')).rejects.toThrow('cache write failed')
+    expect(mocks.metric).toHaveBeenCalledTimes(1)
+    expect(mocks.metric).toHaveBeenCalledWith(expect.objectContaining({ userId: 'map-owner', service: 'panorama', outcome: 'success' }))
+  })
+  it('实际外部请求失败只计一次错误', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network failed')))
+    await expect(getPanoramaImage(input)).rejects.toMatchObject({ statusCode: 502 })
+    expect(mocks.metric).toHaveBeenCalledTimes(1)
+    expect(mocks.metric).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'error' }))
   })
   it('不透传上游错误与密钥', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('audit-fake-not-a-real-key', { status: 403 })))
@@ -53,6 +84,7 @@ describe('百度影像代理安全边界', () => {
     mocks.get.mockResolvedValueOnce(Buffer.from('<svg/>'))
     expect((await getPanoramaImage(input)).cached).toBe(false)
     expect(fetcher).toHaveBeenCalledTimes(1)
+    expect(mocks.metric.mock.calls.map(([event]) => event.outcome)).toEqual(['cache_hit', 'success'])
   })
   it('拒绝超过上限的声明响应并取消读取', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(png, { headers: { 'content-type': 'image/png', 'content-length': String(9 * 1024 * 1024) } })))

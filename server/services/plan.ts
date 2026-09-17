@@ -1,14 +1,15 @@
-import { and, desc, eq, inArray, max } from 'drizzle-orm'
+import { and, desc, eq, inArray, lt, max, or, sql } from 'drizzle-orm'
 import { createError } from 'h3'
 import { BudgetSchema, formatPlanIssues, PlanSchema, type Budget, type Plan } from '../../shared/schemas/plan'
-import type { PlanSource } from '../../shared/types'
+import type { PageOptions, PlanPreview, PlanSource } from '../../shared/types'
 import { toPlanPreview } from '../../shared/types'
 import { diffJson, type DiffEntry } from '../../shared/utils/diff'
 import { applyMergePatch } from '../../shared/utils/merge-patch'
 import { stableStringify } from '../../shared/utils/json'
 import { applyPlanEditOps, PlanEditError, type PlanEditOp } from '../../shared/utils/plan-edits'
-import { plans, planVersions } from '../database/schema'
+import { conversations, messages, plans, planVersions } from '../database/schema'
 import { db } from '../utils/db'
+import { finishPage, readPage } from './pagination'
 
 export type PlanRow = typeof plans.$inferSelect
 export type VersionRow = typeof planVersions.$inferSelect
@@ -58,30 +59,41 @@ function readSnapshot(conn: Reader, userId: string, planId: number) {
 
 type Snapshot = ReturnType<typeof readSnapshot>
 
-function assertVersion(snapshot: Snapshot, expectedVersion?: number) {
+function assertVersion(snapshot: Snapshot, expectedVersion?: number, expectedRevision?: number) {
   const currentVersion = snapshot.current?.version ?? 0
-  if (expectedVersion !== undefined && expectedVersion !== currentVersion) {
+  if ((expectedVersion !== undefined && expectedVersion !== currentVersion)
+    || (expectedRevision !== undefined && expectedRevision !== snapshot.row.revision)) {
     throw createError({
       statusCode: 409,
       statusMessage: '规划已更新，请刷新后重试',
-      data: { currentVersion },
+      data: { currentVersion, currentRevision: snapshot.row.revision },
     })
   }
 }
 
-export async function listPlans(userId: string) {
-  const rows = await db.select({
+async function readPlanList(userId: string, page?: ReturnType<typeof readPage>, filter: { q?: string; sort?: 'created' | 'updated' } = {}) {
+  const cursor = page?.cursor
+  const sortColumn = filter.sort === 'created' ? plans.createdAt : plans.updatedAt
+  const keyword = filter.q?.trim().toLocaleLowerCase()
+  const query = db.select({
     id: plans.id,
     title: plans.title,
     summary: plans.summary,
     coverUrl: plans.coverUrl,
     createdAt: plans.createdAt,
     updatedAt: plans.updatedAt,
+    revision: plans.revision,
     version: planVersions.version,
   }).from(plans)
     .leftJoin(planVersions, eq(plans.currentVersionId, planVersions.id))
-    .where(eq(plans.userId, userId))
-    .orderBy(desc(plans.updatedAt))
+    .where(and(eq(plans.userId, userId), cursor ? or(
+      lt(sortColumn, new Date(cursor.sort)), and(eq(sortColumn, new Date(cursor.sort)), lt(plans.id, cursor.id)),
+    ) : undefined, keyword ? or(
+      sql`instr(lower(${plans.title}), ${keyword}) > 0`, sql`instr(lower(${plans.summary}), ${keyword}) > 0`,
+      inArray(plans.id, db.select({ id: conversations.planId }).from(conversations).where(and(eq(conversations.userId, userId), sql`instr(lower(${conversations.title}), ${keyword}) > 0`))),
+    ) : undefined))
+    .orderBy(desc(sortColumn), desc(plans.id)).$dynamic()
+  const rows = await (page ? query.limit(page.limit + 1) : query)
   // 未回填指针的历史规划按最新版本展示。
   const missing = rows.filter((row) => row.version === null).map((row) => row.id)
   const fallback = missing.length
@@ -90,6 +102,14 @@ export async function listPlans(userId: string) {
     : []
   const versions = new Map(fallback.map((row) => [row.planId, Number(row.version ?? 1)]))
   return rows.map((row) => ({ ...row, version: row.version ?? versions.get(row.id) ?? 1 }))
+}
+
+export async function listPlans(userId: string) { return readPlanList(userId) }
+
+export async function listPlansPage(userId: string, options: PageOptions & { q?: string; sort?: 'created' | 'updated' } = {}) {
+  const scope = `plans:${userId}:${options.sort ?? 'updated'}:${options.q?.trim().toLocaleLowerCase() ?? ''}`
+  const page = readPage(options, scope)
+  return finishPage(await readPlanList(userId, page, options), page, (row) => ({ sort: (options.sort === 'created' ? row.createdAt : row.updatedAt).getTime(), id: row.id }))
 }
 
 export async function getPlanRow(userId: string, planId: number): Promise<PlanRow> {
@@ -110,12 +130,14 @@ export interface CommitOptions {
   messageId?: number | null
   parentVersionId?: number | null
   expectedVersion?: number
+  expectedRevision?: number
+  conversationId?: number
   note?: string
 }
 
 /** Bun SQLite 事务回调必须同步，全部查询显式执行 .get/.run。 */
 function commitVersion(tx: Transaction, snapshot: Snapshot, next: Plan, opts: CommitOptions) {
-  assertVersion(snapshot, opts.expectedVersion)
+  assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
   const { row, plan: current, latest } = snapshot
   if (opts.parentVersionId !== undefined && opts.parentVersionId !== null) {
     const parent = tx.select({ id: planVersions.id }).from(planVersions)
@@ -140,11 +162,13 @@ function commitVersion(tx: Transaction, snapshot: Snapshot, next: Plan, opts: Co
     summary: next.summary,
     coverUrl: next.cover,
     currentVersionId: versionRow.id,
+    revision: row.revision + 1,
     updatedAt: new Date(),
   }).where(and(eq(plans.id, row.id), eq(plans.userId, row.userId))).run()
   return {
     planId: row.id,
     version,
+    revision: row.revision + 1,
     versionId: versionRow.id,
     diff,
     preview: toPlanPreview(next, row.id, version, opts.source, opts.note),
@@ -157,7 +181,7 @@ function commitAiTurn(
   tx: Transaction,
   snapshot: Snapshot,
   next: Plan,
-  opts: { messageId?: number | null; note?: string },
+  opts: CommitOptions,
 ) {
   const { row, plan: current, current: currentVersion } = snapshot
   const messageId = opts.messageId ?? null
@@ -178,11 +202,13 @@ function commitAiTurn(
       title: next.title,
       summary: next.summary,
       coverUrl: next.cover,
+      revision: row.revision + 1,
       updatedAt: new Date(),
     }).where(and(eq(plans.id, row.id), eq(plans.userId, row.userId))).run()
     return {
       planId: row.id,
       version: existing.version,
+      revision: row.revision + 1,
       versionId: existing.id,
       diff,
       preview: toPlanPreview(next, row.id, existing.version, 'ai', opts.note),
@@ -201,6 +227,51 @@ export interface ApplyEditsOptions {
   messageId?: number | null
   note?: string
   expectedVersion?: number
+  expectedRevision?: number
+}
+
+function assertMessageScope(tx: Transaction, row: PlanRow, opts: CommitOptions) {
+  if (opts.conversationId !== undefined) {
+    const conversation = tx.select({ id: conversations.id }).from(conversations).where(and(
+      eq(conversations.id, opts.conversationId), eq(conversations.planId, row.id), eq(conversations.userId, row.userId),
+    )).get()
+    if (!conversation) throw createError({ statusCode: 404, statusMessage: '会话不属于当前规划' })
+  }
+  if (opts.source === 'ai' && opts.messageId != null) {
+    const message = tx.select({ id: messages.id }).from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(and(eq(messages.id, opts.messageId), eq(messages.role, 'assistant'), eq(conversations.planId, row.id), eq(conversations.userId, row.userId))).get()
+    if (!message) throw createError({ statusCode: 404, statusMessage: '助手消息不属于当前规划' })
+  }
+}
+
+/** 两种 AI 编辑共用无变化检查、同轮合并和事务内预览持久化。 */
+function commitMutation(tx: Transaction, snapshot: Snapshot, next: Plan, opts: CommitOptions) {
+  assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
+  assertMessageScope(tx, snapshot.row, opts)
+  if (opts.parentVersionId != null) {
+    const parent = tx.select({ id: planVersions.id }).from(planVersions)
+      .where(and(eq(planVersions.id, opts.parentVersionId), eq(planVersions.planId, snapshot.row.id))).get()
+    if (!parent) throw createError({ statusCode: 404, statusMessage: '父版本不存在' })
+  }
+  const unchanged = stableStringify(snapshot.plan) === stableStringify(next)
+  const version = snapshot.current?.version ?? 0
+  const result = unchanged ? {
+    planId: snapshot.row.id, version, revision: snapshot.row.revision, versionId: snapshot.current?.id ?? null,
+    diff: [] as DiffEntry[], preview: toPlanPreview(next, snapshot.row.id, version, opts.source, opts.note ?? '内容无变化，未生成新版本'),
+    plan: next, skipped: true,
+  } : { ...(opts.source === 'ai' ? commitAiTurn(tx, snapshot, next, opts) : commitVersion(tx, snapshot, next, opts)), skipped: false }
+  if (opts.source === 'ai' && opts.messageId != null) {
+    tx.update(messages).set({ previewJson: result.preview, planVersionId: result.versionId }).where(eq(messages.id, opts.messageId)).run()
+  }
+  return result
+}
+
+function appendSystemMessage(tx: Transaction, conversationId: number | undefined,
+  result: { preview: PlanPreview; versionId: number | null }, content: string,
+) {
+  if (conversationId === undefined) return
+  tx.insert(messages).values({ conversationId, role: 'system', content, previewJson: result.preview, planVersionId: result.versionId }).run()
+  tx.update(conversations).set({ updatedAt: new Date() }).where(eq(conversations.id, conversationId)).run()
 }
 
 /** 原子编辑：读、顺序应用、校验与写入同一事务；一轮对话只保留一个版本。 */
@@ -212,7 +283,7 @@ export async function applyPlanEdits(
 ) {
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
-    assertVersion(snapshot, opts.expectedVersion)
+    assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     let next: Plan
     try {
       next = parsePlanJson(applyPlanEditOps(snapshot.plan, edits))
@@ -220,19 +291,7 @@ export async function applyPlanEdits(
       if (error instanceof PlanEditError) throw createError({ statusCode: 400, statusMessage: error.message })
       throw error
     }
-    if (stableStringify(snapshot.plan) === stableStringify(next)) {
-      const version = snapshot.current?.version ?? 0
-      return {
-        planId,
-        version,
-        versionId: snapshot.current?.id ?? null,
-        diff: [] as DiffEntry[],
-        preview: toPlanPreview(next, planId, version, 'ai', opts.note ?? '内容无变化，未生成新版本'),
-        plan: next,
-        skipped: true as const,
-      }
-    }
-    return { ...commitAiTurn(tx, snapshot, next, opts), skipped: false as const }
+    return commitMutation(tx, snapshot, next, { ...opts, source: 'ai' })
   }, { behavior: 'immediate' })
 }
 
@@ -266,6 +325,8 @@ export async function createPlan(
       planId: row.id,
       version: 1,
       versionId: versionRow.id,
+      revision: row.revision,
+      plan,
       diff: [] as DiffEntry[],
       preview: toPlanPreview(plan, row.id, 1, source),
     }
@@ -280,7 +341,7 @@ export async function commitPlanVersion(
 ) {
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
-    return commitVersion(tx, snapshot, parsePlanJson(nextInput), opts)
+    return commitMutation(tx, snapshot, parsePlanJson(nextInput), opts)
   }, { behavior: 'immediate' })
 }
 
@@ -291,12 +352,9 @@ export async function patchPlan(userId: string, planId: number, patch: unknown, 
   }
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
-    assertVersion(snapshot, opts.expectedVersion)
+    assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     const next = parsePlanJson(applyMergePatch(snapshot.plan, patch))
-    return commitVersion(tx, snapshot, next, {
-      ...opts,
-      expectedVersion: snapshot.current?.version ?? 0,
-    })
+    return commitMutation(tx, snapshot, next, opts)
   }, { behavior: 'immediate' })
 }
 
@@ -314,9 +372,21 @@ export async function listVersions(userId: string, planId: number, limit = 50) {
     .orderBy(desc(planVersions.version)).limit(limit)
 }
 
+export async function listVersionsPage(userId: string, planId: number, options: PageOptions = {}) {
+  await getPlanRow(userId, planId)
+  const page = readPage(options, `versions:${userId}:${planId}`)
+  const rows = await db.select({
+    id: planVersions.id, version: planVersions.version, source: planVersions.source,
+    parentVersionId: planVersions.parentVersionId, messageId: planVersions.messageId,
+    createdAt: planVersions.createdAt, diffJson: planVersions.diffJson,
+  }).from(planVersions).where(and(eq(planVersions.planId, planId), page.cursor ? lt(planVersions.version, page.cursor.sort) : undefined))
+    .orderBy(desc(planVersions.version)).limit(page.limit + 1)
+  return finishPage(rows, page, (row) => ({ sort: row.version, id: row.id }))
+}
+
 export async function getVersionPlan(userId: string, planId: number, version: number) {
   await getPlanRow(userId, planId)
-  const row = db.select().from(planVersions)
+  const row = db.select({ planJson: planVersions.planJson }).from(planVersions)
     .where(and(eq(planVersions.planId, planId), eq(planVersions.version, version))).get()
   if (!row) throw createError({ statusCode: 404, statusMessage: `版本 v${version} 不存在` })
   return parsePlanJson(row.planJson)
@@ -327,31 +397,39 @@ export async function switchToVersion(
   userId: string,
   planId: number,
   version: number,
-  opts: { messageId?: number | null; expectedVersion?: number } = {},
+  opts: { messageId?: number | null; expectedVersion?: number; expectedRevision?: number; conversationId?: number } = {},
 ) {
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
-    assertVersion(snapshot, opts.expectedVersion)
+    assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
+    assertMessageScope(tx, snapshot.row, { ...opts, source: 'rollback' })
     const target = tx.select().from(planVersions)
       .where(and(eq(planVersions.planId, planId), eq(planVersions.version, version))).get()
     if (!target) throw createError({ statusCode: 404, statusMessage: `版本 v${version} 不存在` })
     const next = parsePlanJson(target.planJson)
-    tx.update(plans).set({
+    const changed = snapshot.row.currentVersionId !== target.id || stableStringify(snapshot.plan) !== stableStringify(next)
+    const revision = snapshot.row.revision + Number(changed)
+    if (changed) tx.update(plans).set({
       planJson: next,
       title: next.title,
       summary: next.summary,
       coverUrl: next.cover,
       currentVersionId: target.id,
+      revision,
       updatedAt: new Date(),
     }).where(and(eq(plans.id, snapshot.row.id), eq(plans.userId, snapshot.row.userId))).run()
-    return {
+    const result = {
       planId,
       version: target.version,
+      revision,
       versionId: target.id,
       switched: true as const,
+      skipped: !changed,
       preview: toPlanPreview(next, planId, target.version, 'rollback', `已切换到 v${version}，历史版本保留`),
       plan: next,
     }
+    appendSystemMessage(tx, opts.conversationId, result, `已切换到 v${result.version}（不新建版本，历史版本保留）`)
+    return result
   }, { behavior: 'immediate' })
 }
 
@@ -367,11 +445,12 @@ export async function updatePlanMeta(
     budget?: Budget
     contentMd?: string
     expectedVersion?: number
+    expectedRevision?: number
   },
 ) {
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
-    assertVersion(snapshot, meta.expectedVersion)
+    assertVersion(snapshot, meta.expectedVersion, meta.expectedRevision)
     const next = parsePlanJson({
       ...snapshot.plan,
       ...(meta.title !== undefined ? { title: meta.title } : {}),
@@ -381,17 +460,13 @@ export async function updatePlanMeta(
       ...(meta.tips !== undefined ? { tips: meta.tips } : {}),
       ...(meta.budget !== undefined ? { budget: BudgetSchema.parse(meta.budget) } : {}),
     })
-    let version = snapshot.current?.version ?? 0
-    if (stableStringify(next) !== stableStringify(snapshot.plan)) {
-      version = commitVersion(tx, snapshot, next, {
-        source: 'user', expectedVersion: version, note: '修改规划信息',
-      }).version
-    }
-    if (meta.contentMd !== undefined) {
-      tx.update(plans).set({ contentMd: meta.contentMd, updatedAt: new Date() })
+    const result = commitMutation(tx, snapshot, next, { source: 'user', expectedVersion: meta.expectedVersion, expectedRevision: meta.expectedRevision, note: '修改规划信息' })
+    const contentChanged = meta.contentMd !== undefined && meta.contentMd !== snapshot.row.contentMd
+    if (contentChanged) {
+      tx.update(plans).set({ contentMd: meta.contentMd, revision: result.revision + Number(result.skipped), updatedAt: new Date() })
         .where(and(eq(plans.id, planId), eq(plans.userId, userId))).run()
     }
-    return { ...readPlan(tx, userId, planId), version }
+    return { ...readPlan(tx, userId, planId), version: result.version, plan: next, skipped: result.skipped && !contentChanged }
   }, { behavior: 'immediate' })
 }
 
@@ -399,24 +474,15 @@ export async function updatePlanMeta(
 export async function savePlanVersion(
   userId: string,
   planId: number,
-  opts: { planJson?: unknown; source: PlanSource; messageId?: number | null; note?: string; expectedVersion?: number },
+  opts: CommitOptions & { planJson?: unknown },
 ) {
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
-    assertVersion(snapshot, opts.expectedVersion)
+    assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     const next = opts.planJson === undefined ? snapshot.plan : parsePlanJson(opts.planJson)
-    if (stableStringify(snapshot.plan) === stableStringify(next)) {
-      const version = snapshot.current?.version ?? 0
-      return {
-        planId,
-        version,
-        versionId: snapshot.current?.id ?? null,
-        diff: [] as DiffEntry[],
-        preview: toPlanPreview(snapshot.plan, planId, version, opts.source, '内容无变化，未生成新版本'),
-        skipped: true,
-      }
-    }
-    return { ...commitVersion(tx, snapshot, next, opts), skipped: false }
+    const result = commitMutation(tx, snapshot, next, opts)
+    appendSystemMessage(tx, opts.conversationId, result, result.skipped ? '内容无变化，未生成新版本' : `已保存为 v${result.version}`)
+    return result
   }, { behavior: 'immediate' })
 }
 

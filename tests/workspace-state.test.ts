@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { computed, ref, shallowRef } from 'vue'
+import { computed, ref, shallowRef, watch } from 'vue'
 import type { MessageRecord, PlanPreview } from '../shared/types'
 import type { PlanDetail } from '../app/utils/api'
 import { toWorkbenchMessages, useWorkspace } from '../app/composables/useWorkspace'
 
 const mocks = vi.hoisted(() => ({
-  plans: { list: vi.fn(), detail: vi.fn(), versions: vi.fn(), create: vi.fn(), save: vi.fn(), switchVersion: vi.fn(), remove: vi.fn(), updateMeta: vi.fn() },
-  conversations: { list: vi.fn(), detail: vi.fn(), create: vi.fn(), remove: vi.fn() },
+  plans: { list: vi.fn(), listPage: vi.fn(), detail: vi.fn(), versions: vi.fn(), versionsPage: vi.fn(), create: vi.fn(), save: vi.fn(), switchVersion: vi.fn(), remove: vi.fn(), updateMeta: vi.fn() },
+  conversations: { list: vi.fn(), listPage: vi.fn(), detail: vi.fn(), messagesPage: vi.fn(), create: vi.fn(), remove: vi.fn() },
+  chatRuns: vi.fn(),
+  cacheGet: vi.fn(), cacheSet: vi.fn(),
 }))
+vi.mock('~/utils/idb', () => ({ idbGet: mocks.cacheGet, idbSet: mocks.cacheSet }))
 
 vi.mock('~/utils/api', () => ({
   api: mocks,
@@ -31,25 +34,33 @@ function deferred<T>() {
 }
 
 function plan(id: number): PlanDetail {
-  return { id, title: `规划 ${id}`, version: 1, plan: { title: `规划 ${id}`, days: [] } } as PlanDetail
+  return { id, title: `规划 ${id}`, version: 1, revision: 4, plan: { title: `规划 ${id}`, days: [] } } as PlanDetail
 }
 
 let app: object
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.resetAllMocks()
   app = {}
   vi.stubGlobal('useNuxtApp', () => app)
   vi.stubGlobal('ref', ref)
   vi.stubGlobal('shallowRef', shallowRef)
   vi.stubGlobal('computed', computed)
+  vi.stubGlobal('watch', watch)
   mocks.plans.list.mockResolvedValue([])
+  mocks.plans.listPage.mockImplementation(async () => ({ items: await mocks.plans.list(), nextCursor: null, hasMore: false }))
   mocks.plans.detail.mockImplementation(async (id: number) => plan(id))
   mocks.plans.versions.mockResolvedValue([])
+  mocks.plans.versionsPage.mockResolvedValue({ items: [], nextCursor: null, hasMore: false })
+  mocks.chatRuns.mockResolvedValue([])
+  mocks.cacheGet.mockResolvedValue(null)
+  mocks.cacheSet.mockResolvedValue(undefined)
   mocks.conversations.list.mockResolvedValue([
     { id: 11, planId: 1, title: '会话一' },
     { id: 22, planId: 2, title: '会话二' },
   ])
   mocks.conversations.detail.mockImplementation(async (id: number) => ({ conversation: { id, planId: id === 11 ? 1 : 2 }, messages: [] }))
+  mocks.conversations.listPage.mockImplementation(async (planId?: number) => ({ items: (await mocks.conversations.list()).filter((item: { planId: number }) => !planId || planId === item.planId), nextCursor: null, hasMore: false }))
+  mocks.conversations.messagesPage.mockImplementation(async (id: number) => ({ ...await mocks.conversations.detail(id), messagePage: { nextCursor: null, hasMore: false } }))
 })
 afterEach(() => {
   vi.useRealTimers()
@@ -57,6 +68,62 @@ afterEach(() => {
 })
 
 describe('工作区状态隔离与并发保护', () => {
+  it('搜索首屏未完成时禁止携带旧游标加载更多，迟到旧响应也不能覆盖搜索', async () => {
+    vi.useFakeTimers()
+    const workspace = useWorkspace()
+    mocks.plans.listPage.mockResolvedValueOnce({ items: [plan(1)], nextCursor: 'old-cursor', hasMore: true })
+    await workspace.loadPlans()
+    const fresh = deferred<{ items: PlanDetail[]; nextCursor: string; hasMore: boolean }>()
+    mocks.plans.listPage.mockReturnValueOnce(fresh.promise)
+    workspace.keyword.value = '杭州'
+    expect(workspace.plansHasMore.value).toBe(false)
+    await workspace.loadMorePlans()
+    await vi.advanceTimersByTimeAsync(250)
+    await workspace.loadMorePlans()
+    expect(mocks.plans.listPage).toHaveBeenCalledTimes(2)
+    expect(mocks.plans.listPage).toHaveBeenLastCalledWith(undefined, '杭州', 'updated')
+    fresh.resolve({ items: [plan(2)], nextCursor: 'new-cursor', hasMore: true })
+    await vi.advanceTimersByTimeAsync(0)
+    mocks.plans.listPage.mockResolvedValueOnce({ items: [plan(3)], nextCursor: null, hasMore: false })
+    await workspace.loadMorePlans()
+    expect(mocks.plans.listPage).toHaveBeenLastCalledWith('new-cursor', '杭州', 'updated')
+    expect(workspace.plans.value.map((item) => item.id)).toEqual([2, 3])
+    workspace.resetWorkspace()
+  })
+
+  it('排序切换时禁止旧游标并在退出时取消待发搜索', async () => {
+    vi.useFakeTimers()
+    const workspace = useWorkspace()
+    mocks.plans.listPage.mockResolvedValueOnce({ items: [plan(1)], nextCursor: 'updated-cursor', hasMore: true })
+    await workspace.loadPlans()
+    const fresh = deferred<{ items: PlanDetail[]; nextCursor: null; hasMore: boolean }>()
+    mocks.plans.listPage.mockReturnValueOnce(fresh.promise)
+    workspace.toggleSort()
+    await workspace.loadMorePlans()
+    expect(mocks.plans.listPage).toHaveBeenCalledTimes(2)
+    expect(mocks.plans.listPage).toHaveBeenLastCalledWith(undefined, undefined, 'created')
+    workspace.keyword.value = '待发搜索'
+    workspace.resetWorkspace()
+    fresh.resolve({ items: [plan(2)], nextCursor: null, hasMore: false })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(mocks.plans.listPage).toHaveBeenCalledTimes(2)
+    expect(workspace.plans.value).toEqual([])
+  })
+
+  it('搜索旧会话由服务端过滤且切换词后不继续旧会话游标', async () => {
+    vi.useFakeTimers()
+    const workspace = useWorkspace()
+    workspace.keyword.value = '旧会话'
+    mocks.conversations.listPage.mockResolvedValueOnce({ items: [], nextCursor: 'old-conversations', hasMore: true })
+    await workspace.loadConversations(1)
+    expect(mocks.conversations.listPage).toHaveBeenLastCalledWith(1, undefined, '旧会话')
+    workspace.keyword.value = '另一个词'
+    await workspace.loadMoreConversations(1)
+    expect(mocks.conversations.listPage).toHaveBeenCalledTimes(1)
+    expect(workspace.isConversationsLoaded(1)).toBe(false)
+    workspace.resetWorkspace()
+  })
+
   it('同一 Nuxt app 共用状态，不同 SSR app 不共享任何工作区', () => {
     const first = useWorkspace()
     first.currentPlan.value = plan(1)
@@ -129,7 +196,7 @@ describe('工作区状态隔离与并发保护', () => {
     workspace.currentConversationId.value = 11
     mocks.plans.save.mockResolvedValue({ planId: 2, version: 2, skipped: false })
     await workspace.savePlan(undefined, 7)
-    expect(mocks.plans.save).toHaveBeenCalledWith(2, { planJson: undefined, expectedVersion: 7, conversationId: undefined })
+    expect(mocks.plans.save).toHaveBeenCalledWith(2, { planJson: undefined, expectedVersion: 7, expectedRevision: 4, conversationId: undefined })
     expect(workspace.mainMode.value).toBe('plan')
   })
 
@@ -137,11 +204,11 @@ describe('工作区状态隔离与并发保护', () => {
     const workspace = useWorkspace()
     await workspace.openPlanView(1)
     await workspace.updatePlanMeta({ title: '新标题' })
-    expect(mocks.plans.updateMeta).toHaveBeenLastCalledWith(1, { title: '新标题', expectedVersion: 1 })
+    expect(mocks.plans.updateMeta).toHaveBeenLastCalledWith(1, { title: '新标题', expectedVersion: 1, expectedRevision: 4 })
     await workspace.updatePlanMeta({ title: '新标题', expectedVersion: 5 })
-    expect(mocks.plans.updateMeta).toHaveBeenLastCalledWith(1, { title: '新标题', expectedVersion: 5 })
+    expect(mocks.plans.updateMeta).toHaveBeenLastCalledWith(1, { title: '新标题', expectedVersion: 5, expectedRevision: 4 })
     await workspace.updatePlanMeta({ title: '新标题', expectedVersion: 5 }, 7)
-    expect(mocks.plans.updateMeta).toHaveBeenLastCalledWith(1, { title: '新标题', expectedVersion: 7 })
+    expect(mocks.plans.updateMeta).toHaveBeenLastCalledWith(1, { title: '新标题', expectedVersion: 7, expectedRevision: 4 })
   })
 
   it('可见地捕获保存冲突，不向事件处理器抛出拒绝', async () => {
@@ -162,6 +229,79 @@ describe('工作区状态隔离与并发保护', () => {
     mocks.plans.detail.mockClear()
     await vi.runAllTimersAsync()
     expect(mocks.plans.detail).not.toHaveBeenCalled()
+  })
+
+  it('同规划查看总览/设置/原会话不中止生成且保留Chat实例', async () => {
+    const workspace = useWorkspace()
+    await workspace.openWorkspace(1)
+    const instance = workspace.chat.value!
+    await workspace.openPlanView(1)
+    workspace.openSettings()
+    await workspace.openConversation(11)
+    expect(workspace.chat.value).toBe(instance)
+    expect(instance.stop).not.toHaveBeenCalled()
+    expect(workspace.mainMode.value).toBe('chat')
+  })
+
+  it('保存只对账当前规划和消息，不重新拉取全账号列表', async () => {
+    const workspace = useWorkspace()
+    await workspace.openWorkspace(1)
+    mocks.plans.listPage.mockClear()
+    mocks.conversations.listPage.mockClear()
+    mocks.plans.detail.mockClear()
+    mocks.conversations.messagesPage.mockClear()
+    await workspace.savePlan(undefined, 1, 3)
+    expect(mocks.plans.save).toHaveBeenCalledWith(1, expect.objectContaining({ expectedRevision: 3 }))
+    expect(mocks.plans.listPage).not.toHaveBeenCalled()
+    expect(mocks.conversations.listPage).not.toHaveBeenCalled()
+    expect(mocks.plans.detail).toHaveBeenCalledTimes(1)
+    expect(mocks.conversations.messagesPage).toHaveBeenCalledTimes(1)
+  })
+
+  it('网络失败可显示身份隔离快照，但拒绝离线保存；权限失败不退回缓存', async () => {
+    mocks.cacheGet.mockResolvedValue(plan(1))
+    mocks.plans.detail.mockRejectedValue(new Error('网络断开'))
+    const workspace = useWorkspace()
+    await workspace.openPlanView(1)
+    expect(workspace.offline.value).toBe(true)
+    expect(await workspace.savePlan()).toBeNull()
+    expect(mocks.plans.save).not.toHaveBeenCalled()
+    workspace.resetWorkspace()
+    mocks.plans.detail.mockRejectedValue(Object.assign(new Error('拒绝访问'), { statusCode: 403 }))
+    await workspace.openPlanView(1)
+    expect(workspace.offline.value).toBe(false)
+    expect(workspace.errorMessage.value).toContain('拒绝访问')
+  })
+
+  it('向前分页保留消息顺序与已有消息且不重复', async () => {
+    const workspace = useWorkspace()
+    mocks.conversations.messagesPage.mockResolvedValueOnce({ conversation: { id: 11, planId: 1 }, messages: [{ id: 3, role: 'user', content: '三' }], messagePage: { nextCursor: 'older', hasMore: true } })
+    await workspace.openWorkspace(1)
+    mocks.conversations.messagesPage.mockResolvedValueOnce({ conversation: { id: 11, planId: 1 }, messages: [{ id: 1, role: 'user', content: '一' }, { id: 2, role: 'assistant', content: '二' }, { id: 3, role: 'user', content: '三' }], messagePage: { nextCursor: null, hasMore: false } })
+    await workspace.loadOlderMessages()
+    expect(workspace.chat.value?.messages.map((item) => item.id)).toEqual(['db-1', 'db-2', 'db-3'])
+    expect(workspace.messagesHasMore.value).toBe(false)
+  })
+
+  it('跨设备新增超过一页时重置分页游标，避免中间历史永远缺失', async () => {
+    const workspace = useWorkspace()
+    mocks.conversations.messagesPage.mockResolvedValueOnce({ conversation: { id: 11, planId: 1 }, messages: [{ id: 100, role: 'user', content: '旧页' }], messagePage: { nextCursor: 'before-100', hasMore: true } })
+    await workspace.openWorkspace(1)
+    mocks.conversations.messagesPage.mockResolvedValueOnce({ conversation: { id: 11, planId: 1 }, messages: [{ id: 170, role: 'user', content: '新页' }], messagePage: { nextCursor: 'before-170', hasMore: true } })
+    await workspace.reloadConversation()
+    expect(workspace.chat.value?.messages.map((message) => message.id)).toEqual(['db-170'])
+    mocks.conversations.messagesPage.mockResolvedValueOnce({ conversation: { id: 11, planId: 1 }, messages: [{ id: 150, role: 'user', content: '中间记录' }], messagePage: { nextCursor: null, hasMore: false } })
+    await workspace.loadOlderMessages()
+    expect(mocks.conversations.messagesPage).toHaveBeenLastCalledWith(11, 'before-170')
+    expect(workspace.chat.value?.messages.map((message) => message.id)).toEqual(['db-150', 'db-170'])
+  })
+
+  it('离线版本加载明确返回false，调用方可停止历史遍历', async () => {
+    const workspace = useWorkspace()
+    workspace.currentPlan.value = plan(1)
+    workspace.offline.value = true
+    expect(await workspace.loadVersions(true)).toBe(false)
+    expect(mocks.plans.versionsPage).not.toHaveBeenCalled()
   })
 })
 

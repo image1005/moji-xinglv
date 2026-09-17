@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { appendMessage, getConversation } from '../../../services/conversation'
+import { getConversation } from '../../../services/conversation'
 import { switchToVersion } from '../../../services/plan'
 import { requireUser } from '../../../utils/session'
 
@@ -7,6 +7,7 @@ const BodySchema = z.object({
   version: z.number().int().positive(),
   conversationId: z.number().int().positive().optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
+  expectedRevision: z.number().int().positive().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -22,14 +23,8 @@ export default defineEventHandler(async (event) => {
   }
   const result = await switchToVersion(user.id, id, body.version, {
     expectedVersion: body.expectedVersion,
+    expectedRevision: body.expectedRevision,
+    conversationId: body.conversationId,
   })
-  if (body.conversationId !== undefined) {
-    await appendMessage(body.conversationId, {
-      role: 'system',
-      content: `已切换到 v${result.version}（不新建版本，历史版本保留）`,
-      preview: result.preview,
-      planVersionId: result.versionId,
-    })
-  }
   return result
 })

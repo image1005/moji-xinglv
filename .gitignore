@@ -26,6 +26,10 @@ logs/
 # 测试与检查缓存
 coverage/
 .eslintcache
+.verification/
+backups/
+test-results/
+playwright-report/
 
 # README 本地预览产物
 .preview/

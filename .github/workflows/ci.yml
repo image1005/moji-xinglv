@@ -10,7 +10,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       AUTH_SECRET: ci-only-dummy-auth-secret-not-for-production-2026
       BETTER_AUTH_URL: http://localhost:3000
@@ -30,3 +30,20 @@ jobs:
         run: bun run check
       - name: 构建生产产物
         run: bun run build
+      - name: 隔离数据库 HTTP 验收
+        run: bun run test:integration
+      - name: 真实进程退出与同库恢复验收
+        run: bun run test:recovery
+      - name: 安装浏览器验收所需 Chromium
+        run: bunx playwright install --with-deps chromium
+      - name: 本地模拟 AI 浏览器验收
+        run: bun run test:browser
+      - name: 保存浏览器报告和截图
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-verification
+          path: |
+            .verification/browser
+            .verification/recovery
+          if-no-files-found: ignore

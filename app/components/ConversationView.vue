@@ -3,7 +3,7 @@ import { apiErrorMessage } from '~/utils/api'
 
 const {
   chat, conversations, currentPlan, currentConversationId, errorMessage, savedAt,
-  loading, sendMessage, stop, savePlan, newSession, createWorkspace,
+  loading, sendMessage, retryMessage, stop, savePlan, newSession, createWorkspace, messagesHasMore, loadingHistory, loadOlderMessages, runs, reloadConversation, refreshRuns, offline,
 } = useWorkspace()
 const tab = ref<'chat' | 'roadmap'>('chat')
 const drafts = reactive<Record<string, string>>({})
@@ -17,9 +17,11 @@ const saving = ref(false)
 const composing = ref(false)
 const localError = ref('')
 const lastRequest = ref<{ key: string; text: string } | null>(null)
+const guide = reactive({ destination: '', days: 3, budget: '', people: 2, pace: '舒缓' })
+const latestRun = computed(() => runs.value[0])
 const messages = computed(() => chat.value?.messages ?? [])
 const streaming = computed(() => chat.value?.status === 'streaming' || chat.value?.status === 'submitted')
-const busy = computed(() => loading.value || sending.value || saving.value || streaming.value)
+const busy = computed(() => loading.value || sending.value || saving.value || streaming.value || offline.value)
 const conversation = computed(() => conversations.value.find((c) => c.id === currentConversationId.value) ?? null)
 const visibleError = computed(() => localError.value || errorMessage.value)
 const canRestore = computed(() => lastRequest.value?.key === draftKey.value && !!lastRequest.value.text)
@@ -36,13 +38,41 @@ function onScroll() {
   const el = scroller.value
   if (el) stickToBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 100
 }
-watch(messages, () => void nextTick(scrollToBottom), { deep: true })
+let scrollFrame = 0
+function scheduleScroll() {
+  if (!import.meta.client || scrollFrame || loadingHistory.value) return
+  scrollFrame = requestAnimationFrame(() => { scrollFrame = 0; scrollToBottom() })
+}
+watch(() => [messages.value.length, messages.value.at(-1)?.parts.map((part) => part.type === 'text' ? part.text.length : part.type).join(':')], scheduleScroll)
+onBeforeUnmount(() => { if (scrollFrame) cancelAnimationFrame(scrollFrame) })
 watch([currentConversationId, tab], () => {
   localError.value = ''
   stickToBottom.value = true
   void nextTick(scrollToBottom)
 })
 onActivated(() => void nextTick(scrollToBottom))
+
+function fillGuide() {
+  if (!guide.destination.trim() || busy.value) return
+  useSuggestion(`请为 ${guide.people} 人规划${guide.destination.trim()} ${guide.days} 天旅行，节奏${guide.pace}${guide.budget ? `，总预算 ${guide.budget} 元人民币` : ''}。请安排每日景点、住宿和餐饮，保留休息时间，并注明需要出行前核实的信息。`)
+}
+async function loadHistory() {
+  const element = scroller.value
+  const height = element?.scrollHeight ?? 0
+  const top = element?.scrollTop ?? 0
+  stickToBottom.value = false
+  await loadOlderMessages()
+  await nextTick()
+  if (element) element.scrollTop = top + element.scrollHeight - height
+}
+function tabKey(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const element = event.currentTarget as HTMLElement
+  tab.value = event.key === 'Home' ? 'chat' : event.key === 'End' ? 'roadmap' : tab.value === 'chat' ? 'roadmap' : 'chat'
+  void nextTick(() => element.querySelector<HTMLElement>('[aria-selected="true"]')?.focus())
+}
+async function recoverConversation() { await reloadConversation(); await refreshRuns() }
 
 function useSuggestion(prompt: string) {
   if (busy.value) return
@@ -99,6 +129,14 @@ function restoreMessage() {
   input.value = lastRequest.value.text
   void nextTick(() => textarea.value?.focus())
 }
+async function retryAsNewTurn() {
+  if (!canRestore.value || busy.value || !lastRequest.value) return
+  if (!window.confirm('已保存的行程改动会保留。将这段需求作为新一轮发送，请先确认不需要调整需求。')) return
+  sending.value = true
+  try {
+    if (await retryMessage(lastRequest.value.text)) input.value = ''
+  } finally { sending.value = false }
+}
 
 async function onSave() {
   if (busy.value || !currentPlan.value) return
@@ -116,12 +154,12 @@ async function onSave() {
 
 <template>
   <section class="conv" :class="{ 'conv--welcome': !messages.length && tab === 'chat' }">
-    <div v-if="conversation" class="conv__tabs" role="tablist" aria-label="对话视图">
-      <button class="conv__tab" :class="{ 'conv__tab--active': tab === 'chat' }" role="tab" :aria-selected="tab === 'chat'" @click="tab = 'chat'"><AppIcon name="chat" :size="14" />旅途对话</button>
-      <button class="conv__tab" :class="{ 'conv__tab--active': tab === 'roadmap' }" role="tab" :aria-selected="tab === 'roadmap'" @click="tab = 'roadmap'"><AppIcon name="compass" :size="14" />版本路线</button>
+    <div v-if="conversation" class="conv__tabs" role="tablist" aria-label="对话视图" @keydown="tabKey">
+      <button id="conversation-tab" class="conv__tab" :class="{ 'conv__tab--active': tab === 'chat' }" role="tab" aria-controls="conversation-panel" :tabindex="tab === 'chat' ? 0 : -1" :aria-selected="tab === 'chat'" @click="tab = 'chat'"><AppIcon name="chat" :size="14" />旅途对话</button>
+      <button id="roadmap-tab" class="conv__tab" :class="{ 'conv__tab--active': tab === 'roadmap' }" role="tab" aria-controls="roadmap-panel" :tabindex="tab === 'roadmap' ? 0 : -1" :aria-selected="tab === 'roadmap'" @click="tab = 'roadmap'"><AppIcon name="compass" :size="14" />版本路线</button>
     </div>
 
-    <div v-if="tab === 'chat'" ref="scroller" class="conv__scroll" @scroll="onScroll">
+    <div v-if="tab === 'chat'" id="conversation-panel" ref="scroller" class="conv__scroll" role="tabpanel" :aria-labelledby="conversation ? 'conversation-tab' : undefined" @scroll="onScroll">
       <div v-if="!messages.length" class="welcome">
         <div class="welcome__intro">
           <p class="eyebrow welcome__eyebrow"><span />山海之间 · 自在行旅</p>
@@ -129,6 +167,17 @@ async function onSave() {
           <p class="welcome__description">把向往写在这里，让每一程都有自己的模样。</p>
           <div class="welcome__window" aria-hidden="true"><div /><AppIcon name="mountain" :size="76" /><span>一笺一世界</span></div>
         </div>
+        <form class="travel-guide panel" @submit.prevent="fillGuide">
+          <strong>定下这次旅行</strong>
+          <div class="travel-guide__fields">
+            <label class="field">目的地<input v-model="guide.destination" required maxlength="100" placeholder="想去的城市" :disabled="busy"></label>
+            <label class="field">天数<input v-model.number="guide.days" type="number" min="1" max="90" required :disabled="busy"></label>
+            <label class="field">人数<input v-model.number="guide.people" type="number" min="1" max="100" required :disabled="busy"></label>
+            <label class="field">总预算（元）<input v-model="guide.budget" type="number" min="0" max="100000000" placeholder="可不填" :disabled="busy"></label>
+            <label class="field">节奏<select v-model="guide.pace" :disabled="busy"><option>舒缓</option><option>适中</option><option>充实</option></select></label>
+          </div>
+          <button class="btn btn--seal btn--small" :disabled="busy || !guide.destination.trim()">填入旅行心愿</button>
+        </form>
         <div class="welcome__suggest-head"><span>从一份灵感开始</span><span class="welcome__hint">或写下你的目的地</span></div>
         <div class="welcome__suggestions">
           <button v-for="suggestion in suggestions" :key="suggestion.number" class="suggestion" :disabled="busy" @click="useSuggestion(suggestion.prompt)">
@@ -138,13 +187,17 @@ async function onSave() {
           </button>
         </div>
       </div>
-      <div v-else class="conv__messages"><ChatMessage v-for="message in messages" :key="message.id" :message="message" /></div>
+      <div v-else class="conv__messages">
+        <button v-if="messagesHasMore" class="btn btn--ghost" :disabled="loadingHistory || streaming" @click="loadHistory">{{ loadingHistory ? '正在翻阅…' : '查看更早的对话' }}</button>
+        <ChatMessage v-for="(message, index) in messages" :key="message.id" :message="message" :streaming="streaming && index === messages.length - 1" />
+      </div>
       <p v-if="streaming" class="conv__thinking" role="status"><span />正在为你细细安排旅途…</p>
     </div>
-    <VersionRoadmap v-else class="conv__trajectory" />
+    <LazyVersionRoadmap v-else id="roadmap-panel" role="tabpanel" aria-labelledby="roadmap-tab" class="conv__trajectory" />
 
     <footer class="conv__footer">
-      <div v-if="visibleError" class="feedback conv__error" role="alert"><span>{{ visibleError }}</span><button v-if="canRestore" class="btn btn--small btn--ghost" :disabled="busy" @click="restoreMessage">重新编辑</button></div>
+      <div v-if="latestRun && ['interrupted', 'failed', 'running', 'queued'].includes(latestRun.status) && !streaming" class="feedback" role="status">{{ ['running', 'queued'].includes(latestRun.status) ? '这段对话仍有生成任务，可刷新查看进度。' : '上次生成未完整结束，已保存的行程和预览会保留。' }}<button class="btn btn--small" @click="recoverConversation">查看已保存结果</button></div>
+      <div v-if="visibleError" class="feedback conv__error" role="alert"><span>{{ visibleError }}</span><button v-if="canRestore" class="btn btn--small btn--ghost" :disabled="busy" @click="restoreMessage">重新编辑</button><button v-if="canRestore" class="btn btn--small btn--ghost" :disabled="busy" @click="retryAsNewTurn">作为新一轮重试</button></div>
       <div class="composer" :class="{ 'composer--busy': busy }">
         <label class="sr-only" for="travel-message">向旅行助手描述你的行程需求</label>
         <textarea id="travel-message" ref="textarea" v-model="input" rows="2" maxlength="20000" placeholder="想去哪里，待上几日？说说你的旅行心愿…" :disabled="busy" @keydown="onKeydown" @compositionstart="composing = true" @compositionend="composing = false" />
@@ -163,6 +216,10 @@ async function onSave() {
 </template>
 
 <style scoped>
+.travel-guide { padding: 18px; margin: 0 0 22px; }
+.travel-guide__fields { display: grid; grid-template-columns: 2fr 1fr 1fr 1.5fr 1fr; gap: 10px; margin: 12px 0; }
+.travel-guide__fields input, .travel-guide__fields select { width: 100%; min-width: 0; }
+@media (max-width: 640px) { .travel-guide__fields { grid-template-columns: 1fr 1fr; } .travel-guide__fields > :first-child { grid-column: 1 / -1; } }
 .conv { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .conv__tabs { display: flex; align-items: center; gap: 23px; padding: 0 34px; min-height: 49px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0; }
 .conv__tab { display: flex; align-items: center; gap: 7px; align-self: stretch; border: none; border-bottom: 2px solid transparent; background: none; padding: 13px 0; font-size: 12px; color: var(--ink-faint); cursor: pointer; }

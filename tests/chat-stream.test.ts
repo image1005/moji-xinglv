@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   where: vi.fn(),
   select: vi.fn(),
   versionGet: vi.fn(),
+  claimRun: vi.fn(), finishRun: vi.fn(), checkpointRun: vi.fn(),
 }))
 
 vi.mock('@mastra/ai-sdk', () => ({ handleChatStream: mocks.handleChatStream }))
@@ -40,7 +41,10 @@ vi.mock('../server/services/conversation', () => ({
 }))
 vi.mock('../server/services/agents-md', () => ({ resolveAgentsMd: mocks.resolveAgentsMd }))
 vi.mock('../server/services/plan', () => ({ getPlanSnapshot: mocks.getPlanSnapshot }))
-vi.mock('../server/agents/travel-agent', () => ({ createTravelMastra: mocks.createTravelMastra }))
+vi.mock('../server/agents/travel-agent', () => ({ createTravelMastra: mocks.createTravelMastra, buildInstructions: () => '离线系统规则' }))
+vi.mock('../server/services/chat-runs', () => ({ claimRun: mocks.claimRun, finishRun: mocks.finishRun, checkpointRun: mocks.checkpointRun, waitForRun: async () => {}, attachRunMessage: () => {} }))
+vi.mock('../server/services/metrics', () => ({ recordMetric: () => {} }))
+vi.mock('../server/services/ai-history', () => ({ includeInitialRequirements: (_userId: string, _id: number, records: unknown[]) => records }))
 vi.mock('../server/utils/db', () => ({ db: { update: mocks.update, select: mocks.select } }))
 
 const planId = 41
@@ -115,7 +119,15 @@ beforeEach(() => {
   mocks.appendMessage.mockImplementation(async (_id: number, message: Chunk) => ({ id: ++messageId, ...message }))
   mocks.touchConversation.mockResolvedValue(undefined)
   mocks.resolveAgentsMd.mockResolvedValue('仅测试偏好')
-  mocks.getPlanSnapshot.mockResolvedValue({ plan, latest: { id: 101, version: 1 }, current: { id: 101, version: 1 } })
+  mocks.getPlanSnapshot.mockResolvedValue({ plan, row: { revision: 1 }, latest: { id: 101, version: 1 }, current: { id: 101, version: 1 } })
+  // Real SQLite identity/queue/recovery behavior has its own chat-runs integration fixture.
+  let active = false
+  mocks.claimRun.mockImplementation(() => {
+    if (active) throw Object.assign(new Error('规划正在生成'), { statusCode: 409 })
+    active = true
+    return { id: 1, startedAt: new Date() }
+  })
+  mocks.finishRun.mockImplementation(() => { active = false })
   mocks.createTravelMastra.mockReturnValue({ testMastra: true })
   mocks.handleChatStream.mockResolvedValue(finiteUpstream())
   mocks.createUIMessageStreamResponse.mockImplementation(({ stream }: { stream: ReadableStream<Chunk> }) => {
@@ -154,6 +166,19 @@ afterEach(async () => {
 })
 
 describe('聊天 handler 的生命周期与规划锁', () => {
+  it('尚未结束的流每两秒保存检查点，停止后只完成一次任务收尾', async () => {
+    const upstream = pendingUpstream()
+    upstream.reader.read.mockResolvedValueOnce({ value: { type: 'text-delta', delta: '途中已经生成的文字' }, done: false } as never)
+    mocks.handleChatStream.mockResolvedValueOnce(upstream)
+    const response = await (await handler())({})
+    await vi.advanceTimersByTimeAsync(2100)
+    expect(persisted().content).toBe('途中已经生成的文字')
+    expect(mocks.finishRun).not.toHaveBeenCalled()
+    expect(mocks.checkpointRun).toHaveBeenCalled()
+    await response.cancel()
+    expect(mocks.finishRun).toHaveBeenCalledTimes(1)
+    expect(persisted().content).toContain('生成已停止')
+  })
   it.each(['createTravelMastra', 'handleChatStream'] as const)('%s 初始化失败写明确失败并允许同规划重试', async (stage) => {
     if (stage === 'createTravelMastra') mocks.createTravelMastra.mockImplementationOnce(() => { throw new Error('内部配置细节') })
     else mocks.handleChatStream.mockRejectedValueOnce(new Error('内部配置细节'))
@@ -302,8 +327,8 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     ]))
     const forwarded = await drain(await (await handler())({}))
     expect(JSON.stringify(forwarded)).not.toContain('伪造预览标记')
-    expect(persisted().previewJson).toBeNull()
-    expect(persisted().planVersionId).toBeNull()
+    expect(persisted().previewJson).toBeUndefined()
+    expect(persisted().planVersionId).toBeUndefined()
     expect(JSON.stringify(persisted().toolCalls)).not.toContain('伪造预览标记')
   })
 
@@ -317,6 +342,55 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     expect(part?.errorText).toContain('lodging')
     expect(part?.errorText).not.toContain('[actionable]')
     expect(String((persisted().toolCalls?.[0] as { error?: string } | undefined)?.error)).toContain('lodging')
+  })
+
+  it('handler 的适配层回调保留自有业务异常，避免先被替换成通用错误', async () => {
+    const { markActionable } = await import('../server/utils/errors')
+    mocks.handleChatStream.mockImplementationOnce(async ({ onError }: { onError: (error: unknown) => string }) => finiteUpstream([
+      input,
+      { type: 'tool-output-error', toolCallId: 'known-call', errorText: onError(new Error('Mastra wrapper', {
+        cause: markActionable('第 2 项编辑：meals 必须是字符串数组'),
+      })) },
+    ]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded).toContainEqual({ type: 'tool-output-error', toolCallId: 'known-call', errorText: '第 2 项编辑：meals 必须是字符串数组' })
+    expect(JSON.stringify(persisted().toolCalls)).toContain('meals 必须是字符串数组')
+  })
+
+  it.each([
+    ['get_plan', 'tool-output-available'],
+    ['get_plan', 'tool-output-error'],
+    ['apply_plan_edits', 'tool-output-available'],
+    ['apply_plan_edits', 'tool-output-error'],
+  ])('%s 的空参数在 %s 路径给出准确提示，不暴露框架返回的原始参数', async (toolName, type) => {
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([
+      { type: 'tool-input-available', toolCallId: 'invalid-input', toolName, input: {} },
+      { type, toolCallId: 'invalid-input', errorText: 'masked error', output: {
+        error: true, message: 'Provided arguments: private-input-value', validationErrors: { fields: { planId: {} } },
+      } },
+    ]))
+    const forwarded = await drain(await (await handler())({}))
+    const failure = forwarded.find(chunk => chunk.type === 'tool-output-error')
+    expect(failure?.errorText).toContain('工具参数校验失败')
+    expect(failure?.errorText).toContain('planId')
+    if (toolName === 'apply_plan_edits') expect(failure?.errorText).toContain('edits')
+    expect(JSON.stringify(forwarded)).not.toContain('private-input-value')
+    expect(JSON.stringify(persisted().toolCalls)).not.toContain('private-input-value')
+    expect(persisted().planVersionId).toBeUndefined()
+    expect(mocks.versionGet).not.toHaveBeenCalled()
+  })
+
+  it('读取工具的输出校验失败也显示失败状态，不把框架错误当成正常读取结果', async () => {
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([
+      { type: 'tool-input-available', toolCallId: 'invalid-output', toolName: 'get_plan', input: { planId } },
+      { type: 'tool-output-available', toolCallId: 'invalid-output', output: {
+        error: true, message: 'Provided output: private-plan-value', validationErrors: { fields: { plan: {} } },
+      } },
+    ]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.find(chunk => chunk.type === 'tool-output-error')?.errorText).toContain('工具返回结果校验失败')
+    expect(JSON.stringify(forwarded)).not.toContain('private-plan-value')
+    expect(JSON.stringify(persisted().toolCalls)).not.toContain('private-plan-value')
   })
 
   it('未知工具错误仍替换为固定文案且不泄漏原文', async () => {
@@ -342,8 +416,9 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     ]))
     const forwarded = await drain(await (await handler())({}))
     expect(forwarded).toContainEqual({ type: 'tool-output-available', toolCallId: 'edit-call', output })
-    expect(persisted().previewJson).toEqual(output.preview)
-    expect(persisted().planVersionId).toBe(202)
+    // The plan service commits previews atomically; a delayed stream must never overwrite them.
+    expect(persisted().previewJson).toBeUndefined()
+    expect(persisted().planVersionId).toBeUndefined()
   })
 
   it('合法已知调用可转发预览并保存正确版本关联', async () => {
@@ -355,8 +430,8 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     ]))
     const forwarded = await drain(await (await handler())({}))
     expect(forwarded).toContainEqual({ type: 'tool-output-available', toolCallId: 'known-call', output })
-    expect(persisted().previewJson).toEqual(validPreview)
-    expect(persisted().planVersionId).toBe(202)
+    expect(persisted().previewJson).toBeUndefined()
+    expect(persisted().planVersionId).toBeUndefined()
     expect(persisted().toolCalls).toEqual([{ id: 'known-call', name: 'patch_plan_json', input: input.input, output }])
   })
 })

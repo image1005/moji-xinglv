@@ -1,4 +1,5 @@
-import { eq, sql } from 'drizzle-orm'
+import { asc, eq, inArray, lte, sql } from 'drizzle-orm'
+import { z } from 'zod'
 import { cache } from '../database/schema'
 import { db } from '../utils/db'
 
@@ -12,6 +13,40 @@ const storage = () => useStorage('cache')
 interface StoredJson<T> {
   v: T
   e: number
+}
+
+let lastMaintenance = 0
+let maintenance: Promise<void> | undefined
+const capacity = () => z.coerce.number().int().min(1048576).max(20 * 1024 ** 3).parse(process.env.CACHE_MAX_BYTES ?? 512 * 1024 ** 2)
+
+/** 每轮最多删除 200 条，只选键和大小，不把图片读进内存。 */
+export function maintainCache(force = false): Promise<void> {
+  if (maintenance) return maintenance
+  if (!force && Date.now() - lastMaintenance < 60_000) return Promise.resolve()
+  lastMaintenance = Date.now()
+  maintenance = (async () => {
+    const removed = db.transaction((tx) => {
+      const expired = tx.select({ key: cache.key }).from(cache).where(lte(cache.expiresAt, new Date())).orderBy(asc(cache.expiresAt)).limit(200).all()
+      const keys = expired.map((entry) => entry.key)
+      if (keys.length) tx.delete(cache).where(inArray(cache.key, keys)).run()
+      const total = Number(tx.select({ bytes: sql<number>`coalesce(sum(length(${cache.value})), 0)` }).from(cache).get()?.bytes ?? 0)
+      let excess = total - capacity()
+      if (excess > 0 && keys.length < 200) {
+        const oldest = tx.select({ key: cache.key, bytes: sql<number>`length(${cache.value})` }).from(cache).orderBy(asc(cache.createdAt)).limit(200 - keys.length).all()
+        const evicted: string[] = []
+        for (const entry of oldest) {
+          if (excess <= 0) break
+          evicted.push(entry.key)
+          excess -= Number(entry.bytes)
+        }
+        if (evicted.length) tx.delete(cache).where(inArray(cache.key, evicted)).run()
+        keys.push(...evicted)
+      }
+      return keys
+    })
+    await Promise.all(removed.map((key) => storage().removeItem(key)))
+  })().finally(() => { maintenance = undefined })
+  return maintenance
 }
 
 export async function getCachedJson<T>(key: string): Promise<T | null> {
@@ -40,6 +75,7 @@ export async function setCachedJson(key: string, value: unknown, ttlSeconds: num
       target: cache.key,
       set: { value: Buffer.from(text, 'utf8'), expiresAt, type: 'json' },
     })
+  await maintainCache()
 }
 
 export async function getCachedBinary(key: string): Promise<Buffer | null> {
@@ -67,6 +103,7 @@ export async function setCachedBinary(key: string, buffer: Buffer, ttlSeconds: n
   await storage().setItem(`bin:${key}`, {
     v: buffer.toString('base64'), e: expiresAt.getTime(),
   } satisfies StoredJson<string>, { ttl: ttlSeconds })
+  await maintainCache()
 }
 
 export async function clearCache(prefix?: string): Promise<number> {

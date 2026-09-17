@@ -81,4 +81,26 @@ describe('原子编辑操作', () => {
     expect(() => apply([{ target: 'checklist', action: 'add', text: '  ' }])).toThrow(/text/)
     expect(() => apply([{ target: 'spot', action: 'add', day: 0, value: {} }])).toThrow(/景点字段不合法/)
   })
+
+  it('失败行程参数给出类型、枚举和字段层级提示；修正后整批可执行', () => {
+    const original = base()
+    expect(() => applyPlanEditOps(original, [
+      { target: 'plan', action: 'update', value: { title: '本批尚未保存' } },
+      { target: 'day', action: 'add', value: { meals: '午餐和晚餐' } },
+    ])).toThrow(/第 2 项编辑.*meals 必须是字符串数组/)
+    expect(original.title).toBe('江南')
+    expect(original.days).toHaveLength(1)
+    expect(() => apply([{ target: 'food', action: 'add', value: { name: '小吃', meal: '午餐' } }]))
+      .toThrow(/breakfast、lunch、dinner 或 snack/)
+    expect(() => apply([{ target: 'checklist', action: 'add', value: { text: '预约' } }]))
+      .toThrow(/操作顶层 text/)
+    const corrected = PlanSchema.parse(apply([
+      { target: 'day', action: 'add', value: { meals: ['午餐', '晚餐'] } },
+      { target: 'food', action: 'add', value: { name: '小吃', meal: 'snack' } },
+      { target: 'checklist', action: 'add', text: '预约' },
+    ]))
+    expect(corrected.days[1]?.meals).toEqual(['午餐', '晚餐'])
+    expect(corrected.foodJournal[1]?.meal).toBe('snack')
+    expect(corrected.checklist[1]?.text).toBe('预约')
+  })
 })

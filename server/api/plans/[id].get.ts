@@ -14,6 +14,7 @@ export default defineEventHandler(async (event) => {
     coverUrl: row.coverUrl,
     plan,
     version: current?.version ?? 1,
+    revision: row.revision,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   }

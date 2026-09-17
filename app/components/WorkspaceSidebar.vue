@@ -3,8 +3,10 @@ import { apiErrorMessage } from '~/utils/api'
 
 const {
   workspaces, currentPlan, currentConversationId, mainMode, keyword, uiLeftOpen,
-  loading, errorMessage, sortOrder, isExpanded, toggleExpanded, toggleSort, openWorkspace,
+  loading, loadingPlans, errorMessage, sortOrder, isExpanded, toggleExpanded, toggleSort, openWorkspace,
   openPlanView, openSettings, newSession, createWorkspace, removePlan, removeConversation,
+  plansHasMore, loadMorePlans, conversationsHasMore, loadMoreConversations,
+  openConversation, isConversationsLoaded, loadConversations,
 } = useWorkspace()
 const { user } = useCurrentUser()
 const searchOpen = ref(false)
@@ -13,6 +15,35 @@ const actionError = ref('')
 const searchInput = ref<HTMLInputElement | null>(null)
 const disabled = computed(() => loading.value || busy.value)
 const nickname = computed(() => user.value?.name || user.value?.email?.split('@')[0] || '旅人')
+const drawer = ref<HTMLElement | null>(null)
+const mobile = useState('workspace-mobile', () => false)
+let media: MediaQueryList | undefined
+let returnFocus: HTMLElement | null = null
+function updateMobile() { mobile.value = media?.matches ?? false }
+onMounted(() => { media = window.matchMedia('(max-width: 960px)'); updateMobile(); media.addEventListener('change', updateMobile) })
+onBeforeUnmount(() => media?.removeEventListener('change', updateMobile))
+watch([uiLeftOpen, mobile], async ([open, compact]) => {
+  if (open && compact) {
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    await nextTick()
+    if (uiLeftOpen.value) drawer.value?.querySelector<HTMLElement>('button:not(:disabled)')?.focus()
+  } else if (returnFocus) {
+    const target = returnFocus
+    returnFocus = null
+    await nextTick()
+    if (target.isConnected) target.focus()
+  }
+}, { flush: 'post' })
+function onDrawerKeydown(event: KeyboardEvent) {
+  if (!mobile.value || !uiLeftOpen.value) return
+  if (event.key === 'Escape') { event.preventDefault(); uiLeftOpen.value = false; return }
+  if (event.key !== 'Tab') return
+  const elements = [...(drawer.value?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href], [tabindex="0"]') ?? [])].filter((el) => el.getClientRects().length)
+  const first = elements[0]
+  const last = elements.at(-1)
+  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus() }
+  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+}
 
 async function runAction(action: () => Promise<unknown>, closeDrawer = true) {
   if (disabled.value) return
@@ -69,7 +100,7 @@ function showSettings() {
 </script>
 
 <template>
-  <aside class="ws" :class="{ 'ws--open': uiLeftOpen }" aria-label="行笺与对话导航">
+  <aside ref="drawer" class="ws" :class="{ 'ws--open': uiLeftOpen }" :inert="mobile && !uiLeftOpen" :aria-hidden="mobile && !uiLeftOpen ? true : undefined" :role="mobile ? 'dialog' : undefined" :aria-modal="mobile && uiLeftOpen ? true : undefined" aria-label="行笺与对话导航" @keydown="onDrawerKeydown">
     <div class="ws__brand">
       <span class="seal-mark" aria-hidden="true"><span>山</span><span>海</span><span>行</span><span>笺</span></span>
       <div><h1>山海行笺</h1><p>AI 旅行规划</p></div>
@@ -111,18 +142,21 @@ function showSettings() {
             <AppIcon name="book" :size="15" /><span class="row__title">行程总览</span><span class="row__version">v{{ item.plan.version }}</span>
           </button>
           <div v-for="conversation in item.conversations" :key="conversation.id" class="conversation-row" :class="{ 'conversation-row--active': mainMode === 'chat' && currentConversationId === conversation.id }">
-            <button class="row" :disabled="disabled" :aria-current="mainMode === 'chat' && currentConversationId === conversation.id ? 'page' : undefined" @click="runAction(() => openWorkspace(item.plan.id, { conversationId: conversation.id }))">
+            <button class="row" :disabled="disabled" :aria-current="mainMode === 'chat' && currentConversationId === conversation.id ? 'page' : undefined" @click="runAction(() => openConversation(conversation.id))">
               <AppIcon name="chat" :size="14" /><span class="row__title" :title="conversation.title">{{ conversation.title }}</span>
             </button>
             <button class="row__remove" :disabled="disabled" :aria-label="`删除对话${conversation.title}`" title="删除对话" @click="onRemoveConversation(conversation.id)"><AppIcon name="close" :size="12" /></button>
           </div>
-          <button v-if="!item.conversations.length" class="folder__empty" :disabled="disabled" @click="onNewConversation(item.plan.id)"><AppIcon name="plus" :size="12" />写下第一段对话</button>
+          <button v-if="!isConversationsLoaded(item.plan.id)" class="folder__empty" :disabled="disabled" @click="runAction(() => loadConversations(item.plan.id), false)">读取会话</button>
+          <button v-else-if="!item.conversations.length" class="folder__empty" :disabled="disabled" @click="onNewConversation(item.plan.id)"><AppIcon name="plus" :size="12" />写下第一段对话</button>
+          <button v-if="conversationsHasMore[item.plan.id]" class="folder__empty" :disabled="disabled" @click="runAction(() => loadMoreConversations(item.plan.id), false)">更多会话</button>
         </div>
       </div>
+      <button v-if="plansHasMore" class="folder__empty" :disabled="disabled || loadingPlans" @click="runAction(() => loadMorePlans(), false)">更多行笺</button>
       <div v-if="!workspaces.length" class="ws__empty">
         <AppIcon :name="keyword ? 'search' : 'book'" :size="28" />
-        <p>{{ loading ? '正在翻开你的行笺…' : keyword ? '未找到相应行笺' : '山海万里，始于一笺' }}</p>
-        <span v-if="!loading">{{ keyword ? '换个关键词再找找。' : '写下想去的地方，余下交给我们。' }}</span>
+        <p>{{ loading || loadingPlans ? '正在翻开你的行笺…' : keyword ? '未找到相应行笺' : '山海万里，始于一笺' }}</p>
+        <span v-if="!loading && !loadingPlans">{{ keyword ? '换个关键词再找找。' : '写下想去的地方，余下交给我们。' }}</span>
       </div>
     </nav>
 

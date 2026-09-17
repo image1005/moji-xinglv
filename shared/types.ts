@@ -2,6 +2,17 @@ import type { Plan } from './schemas/plan'
 
 export type PlanSource = 'ai' | 'user' | 'rollback'
 
+export interface Page<T> {
+  items: T[]
+  nextCursor: string | null
+  hasMore: boolean
+}
+
+export interface PageOptions {
+  limit?: number
+  cursor?: string
+}
+
 export interface PlanPreviewDay {
   date: string
   city: string

@@ -1,17 +1,79 @@
 <script setup lang="ts">
-import { apiErrorMessage } from '~/utils/api'
+import { api, apiErrorMessage, type PlanDetail } from '~/utils/api'
+import { isDraftForm, mergeDraftFields, type DraftDifference } from '~/utils/draft-merge'
+import { reviewPlan } from '#shared/utils/plan-review'
 
-const { currentPlan, versions, loading, errorMessage, updatePlanMeta, switchVersion, mainMode } = useWorkspace()
+const { currentPlan, versions, loading, errorMessage, updatePlanMeta, switchVersion, mainMode, loadVersions, versionsHasMore, loadingVersions } = useWorkspace()
 const planId = currentPlan.value?.id
-const detail = shallowRef(currentPlan.value)
+const detail = useBoundPlan()
 const history = shallowRef([...versions.value])
 const editing = ref(false)
 const editingVersion = ref(currentPlan.value?.version)
+const editingRevision = ref(currentPlan.value?.revision)
 const busy = ref(false)
 const message = ref('')
 const success = ref('')
 const form = reactive({ title: '', summary: '', contentMd: '', cover: '', tags: '', tips: '', budgetTotal: '', budgetCurrency: 'CNY' })
 const breakdown = ref<{ label: string; amount: string }[]>([])
+const emit = defineEmits<{ editMap: [] }>()
+const checks = computed(() => detail.value ? reviewPlan(detail.value.plan) : [])
+const baseFields = shallowRef<ReturnType<typeof metaFields> | null>(null)
+const latest = shallowRef<PlanDetail | null>(null)
+const differences = ref<DraftDifference[] | null>(null)
+type MetaDraft = { version: number; revision: number; form: typeof form; breakdown: typeof breakdown.value; base: NonNullable<typeof baseFields.value> }
+const draft = usePlanDraft<MetaDraft>(planId, 'plan-metadata', (value) => {
+  const data = value as MetaDraft | null
+  return data && Number.isInteger(data.version) && Number.isInteger(data.revision)
+    && isDraftForm(data.form, form) && data.base && isDraftForm(data.base, { ...form, breakdown: [] })
+    && Array.isArray(data.breakdown) && data.breakdown.every((row) => isDraftForm(row, { label: '', amount: '' }))
+    && Array.isArray(data.base.breakdown) && data.base.breakdown.every((row) => isDraftForm(row, { label: '', amount: '' })) ? data : null
+})
+onActivated(() => { if (currentPlan.value?.id === planId) void loadVersions() })
+watch([editing, form, breakdown, editingVersion, editingRevision, baseFields], () => {
+  if (editing.value && baseFields.value && editingVersion.value !== undefined && editingRevision.value !== undefined) {
+    draft.save({ version: editingVersion.value, revision: editingRevision.value, form: { ...form }, breakdown: breakdown.value.map((row) => ({ ...row })), base: baseFields.value })
+  }
+  differences.value = null
+}, { deep: true, flush: 'sync' })
+onMounted(() => {
+  const value = draft.restore()
+  if (!value) return
+  Object.assign(form, value.form)
+  breakdown.value = value.breakdown
+  baseFields.value = value.base
+  editingVersion.value = value.version
+  editingRevision.value = value.revision
+  editing.value = true
+})
+
+function metaFields(source: PlanDetail) {
+  return { title: source.title, summary: source.summary, contentMd: source.contentMd, cover: source.plan.cover, tags: source.plan.tags.join('、'), tips: source.plan.tips.join('\n'), budgetTotal: String(source.plan.budget.total), budgetCurrency: source.plan.budget.currency, breakdown: Object.entries(source.plan.budget.breakdown ?? {}).map(([label, amount]) => ({ label, amount: String(amount) })) }
+}
+const labels = { title: '名称', summary: '简介', contentMd: '旅行手记', cover: '封面', tags: '标签', tips: '行前小记', budgetTotal: '总预算', budgetCurrency: '币种', breakdown: '预算明细' }
+function mergeEditor(source: PlanDetail) {
+  return mergeDraftFields(baseFields.value!, { ...form, breakdown: breakdown.value }, metaFields(source), labels)
+}
+async function compareLatest() {
+  if (!planId || !baseFields.value || disabled.value) return
+  try {
+    latest.value = await api.plans.detail(planId)
+    differences.value = mergeEditor(latest.value).differences
+  } catch (error) { message.value = apiErrorMessage(error) }
+}
+function reapplyDraft() {
+  if (!latest.value || !baseFields.value) return
+  const merged = mergeEditor(latest.value).merged
+  const { breakdown: rows, ...fields } = merged
+  Object.assign(form, fields)
+  breakdown.value = rows
+  baseFields.value = metaFields(latest.value)
+  editingVersion.value = latest.value.version
+  editingRevision.value = latest.value.revision
+  differences.value = null
+  latest.value = null
+  message.value = ''
+  success.value = '草稿已应用到最新内容，请检查后保存。'
+}
 
 function fillForm(source: NonNullable<typeof currentPlan.value>) {
   form.title = source.title
@@ -49,8 +111,11 @@ watch([currentPlan, versions], () => {
 function editMeta() {
   if (!editing.value && detail.value) {
     editingVersion.value = detail.value.version
+    editingRevision.value = detail.value.revision
     fillForm(detail.value)
+    baseFields.value = metaFields(detail.value)
   }
+  if (editing.value) draft.clear()
   editing.value = !editing.value
   message.value = ''
   success.value = ''
@@ -95,12 +160,13 @@ async function saveMeta() {
       tips: parseTips(form.tips),
       budget: { total, currency, ...(Object.keys(breakdownValue).length ? { breakdown: breakdownValue } : {}) },
       contentMd: form.contentMd,
-    }, editingVersion.value)
+    }, editingVersion.value, editingRevision.value)
     if (result === null) {
       message.value = errorMessage.value || '保存未完成，编辑内容已保留。'
       return
     }
     editing.value = false
+    draft.clear()
     success.value = '行笺资料已保存。'
   } catch (error) {
     message.value = apiErrorMessage(error, '保存未完成，编辑内容已保留。')
@@ -143,7 +209,8 @@ function amount(value: number) {
     <p v-if="message" class="feedback" role="alert">{{ message }}</p>
     <p v-if="success" class="feedback feedback--success" role="status">{{ success }}</p>
     <form v-if="editing" class="panel itinerary__edit" @submit.prevent="saveMeta">
-      <p v-if="editingVersion !== detail.version" class="feedback" role="status">这份行笺已更新，当前草稿基于 v{{ editingVersion }}。请先保留所填内容，再取消编辑并打开最新资料；保存不会覆盖新版本。</p>
+      <p v-if="editingRevision !== undefined && detail.revision > editingRevision" class="feedback" role="status">行笺已有更新。草稿仍保留，请比较最新内容后明确重新应用。</p>
+      <DraftRecovery :persisted="draft.persisted.value" :storage-error="draft.storageError.value" :busy="disabled" :differences="differences" @compare="compareLatest" @reapply="reapplyDraft" />
       <label class="field">行笺名称<input v-model="form.title" type="text" maxlength="200" required :disabled="disabled"></label>
       <label class="field">旅程简介<textarea v-model="form.summary" rows="2" maxlength="4000" :disabled="disabled" /></label>
       <label class="field">封面图地址<input v-model="form.cover" type="url" maxlength="2048" placeholder="https://… 或本站地图代理地址，可留空" :disabled="disabled"></label>
@@ -173,6 +240,10 @@ function amount(value: number) {
       <div><span class="itinerary__stat-label"><AppIcon name="wallet" :size="14" />旅程预算</span><strong class="itinerary__stat-budget">{{ detail.plan.budget.total ? amount(detail.plan.budget.total) : '待定' }}<small v-if="detail.plan.budget.total">{{ detail.plan.budget.currency }}</small></strong></div>
     </section>
 
+    <section v-if="checks.length" class="panel itinerary__review" aria-label="行程检查">
+      <div class="section-title"><h2>行前核对</h2><button class="btn btn--ghost btn--small" @click="emit('editMap')">前往路线编辑</button></div>
+      <ul><li v-for="(check, index) in checks" :key="`${check.code}:${index}`">{{ check.dayIndex === undefined ? '' : `第 ${check.dayIndex + 1} 日 · ` }}{{ check.message }}</li></ul>
+    </section>
     <div class="itinerary__columns">
       <div class="itinerary__route">
         <div class="section-title"><h2>日行一程</h2><span>循着心意，慢慢走</span></div>
@@ -200,7 +271,7 @@ function amount(value: number) {
       </aside>
     </div>
 
-    <section class="itinerary__history"><div class="section-title"><h2>行笺留痕</h2><span>每一版旅程，都值得留存</span></div><ul v-if="history.length" class="version-list"><li v-for="version in history.slice(0, 10)" :key="version.id" class="version-item"><span class="version-item__tag">v{{ version.version }}</span><span class="version-item__source">{{ sourceLabel(version.source) }}</span><span class="version-item__time">{{ formatDateTime(version.createdAt) }}</span><span v-if="version.version === detail.version" class="version-item__current">当前版本</span><button v-else class="btn btn--ghost btn--small" :disabled="disabled" @click="doSwitch(version.version)">切换到此版</button></li></ul><p v-else class="itinerary__history-empty">保存第一版行程后，可在这里回看与恢复历史。</p></section>
+    <section class="itinerary__history"><div class="section-title"><h2>行笺留痕</h2><span>每一版旅程，都值得留存</span></div><ul v-if="history.length" class="version-list"><li v-for="version in history" :key="version.id" class="version-item"><span class="version-item__tag">v{{ version.version }}</span><span class="version-item__source">{{ sourceLabel(version.source) }}</span><span class="version-item__time">{{ formatDateTime(version.createdAt) }}</span><span v-if="version.version === detail.version" class="version-item__current">当前版本</span><button v-else class="btn btn--ghost btn--small" :disabled="disabled" @click="doSwitch(version.version)">切换到此版</button></li></ul><p v-else class="itinerary__history-empty">保存第一版行程后，可在这里回看与恢复历史。</p><button v-if="versionsHasMore" class="btn btn--ghost btn--small" :disabled="loadingVersions" @click="loadVersions(true)">{{ loadingVersions ? '正在翻页…' : '更多历史版本' }}</button></section>
   </div>
 </template>
 

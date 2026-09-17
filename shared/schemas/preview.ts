@@ -9,6 +9,7 @@ export const PlanPreviewSchema = z.object({
 
 export const PlanMutationResultSchema = z.object({
   ok: z.literal(true), version: z.number().int().nonnegative(),
+  revision: z.number().int().positive().optional(),
   versionId: z.number().int().positive().nullable(), preview: PlanPreviewSchema,
   changed: z.number().int().nonnegative().optional(), skipped: z.boolean().optional(),
 })

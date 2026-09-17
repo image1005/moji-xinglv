@@ -2,7 +2,7 @@
 import type { PlanPreview } from '#shared/types'
 import type { WorkbenchMessage } from '~/composables/useWorkspace'
 
-const props = defineProps<{ message: WorkbenchMessage }>()
+const props = defineProps<{ message: WorkbenchMessage; streaming?: boolean }>()
 
 interface LoosePart {
   type: string
@@ -61,7 +61,7 @@ const streamingEmpty = computed(
     <div class="chat-message__bubble">
       <template v-for="(part, index) in parts" :key="index">
         <div v-if="part.type === 'text' && part.text" class="chat-message__text">
-          <MDC v-if="!isUser" :value="part.text" />
+          <StreamingMarkdown v-if="!isUser" :value="part.text" :streaming="streaming" />
           <span v-else>{{ part.text }}</span>
         </div>
         <div v-else-if="part.type === 'data-preview' && part.data" class="chat-message__preview">

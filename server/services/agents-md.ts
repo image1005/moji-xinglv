@@ -55,7 +55,7 @@ export async function getAgentsMd(userId: string, planId: number | null) {
   return db.select().from(agentsMd).where(scope(userId, planId)).get() ?? null
 }
 
-export async function saveAgentsMd(userId: string, planId: number | null, content: string) {
+export async function saveAgentsMd(userId: string, planId: number | null, content: string, expectedVersion?: number) {
   if (planId !== null) await getPlanRow(userId, planId)
   if (content.length > AGENTS_MD_MAX_LENGTH) {
     throw createError({ statusCode: 400, statusMessage: `AGENTS.md 不得超过 ${AGENTS_MD_MAX_LENGTH} 字符` })
@@ -63,6 +63,10 @@ export async function saveAgentsMd(userId: string, planId: number | null, conten
   const clean = sanitizeAgentsMd(content)
   return db.transaction((tx) => {
     const existing = tx.select().from(agentsMd).where(scope(userId, planId)).get()
+    if (expectedVersion !== undefined && expectedVersion !== (existing?.version ?? 0)) {
+      throw createError({ statusCode: 409, statusMessage: '偏好已更新，请比较最新内容后重新保存', data: { currentVersion: existing?.version ?? 0 } })
+    }
+    if (existing?.content === clean) return { id: existing.id, version: existing.version }
     if (existing) {
       tx.update(agentsMd).set({ content: clean, version: existing.version + 1, updatedAt: new Date() })
         .where(eq(agentsMd.id, existing.id)).run()

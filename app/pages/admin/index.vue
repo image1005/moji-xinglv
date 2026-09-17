@@ -18,6 +18,8 @@ const plans = ref<AdminPlan[]>([])
 const cacheData = ref<CacheData | null>(null)
 const message = ref('')
 const loading = ref(false)
+const serviceName: Record<string, string> = { ai: 'AI 模型', staticmap: '静态地图', panorama: '街景' }
+const statusName: Record<string, string> = { queued: '等待中', running: '生成中', completed: '已完成', cancelled: '已停止', failed: '失败', interrupted: '重启中断' }
 
 async function loadTab() {
   loading.value = true
@@ -103,9 +105,27 @@ async function logout() {
         <div class="stat-card"><span class="stat-card__value">{{ stats.messages }}</span><span class="stat-card__label">消息</span></div>
         <div class="stat-card"><span class="stat-card__value">{{ stats.cache.total }}</span><span class="stat-card__label">缓存条目</span></div>
         <div class="stat-card"><span class="stat-card__value">{{ formatBytes(stats.cache.bytes) }}</span><span class="stat-card__label">缓存体积</span></div>
-        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.panoramaImages }}</span><span class="stat-card__label">历史街景存档</span></div>
-        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.staticMaps }}</span><span class="stat-card__label">地图 / 街景缓存</span></div>
-        <div class="stat-card"><span class="stat-card__value">{{ stats.baidu.poiQueries }}</span><span class="stat-card__label">外部地点搜索（未启用）</span></div>
+        <div v-for="run in stats.runs" :key="run.status" class="stat-card"><span class="stat-card__value">{{ run.count }}</span><span class="stat-card__label">{{ statusName[run.status] || run.status }}</span></div>
+      </section>
+
+      <section v-if="tab === 'overview' && stats" class="admin__table-wrap">
+        <h2>实际服务用量</h2>
+        <p class="admin__loading">自指标启用起累计；缓存命中单独统计。Token 仅累计供应商返回的用量，未报告的调用不作估算。</p>
+        <table class="admin__table">
+          <thead><tr><th>服务</th><th>外部请求</th><th>失败</th><th>缓存命中</th><th>平均耗时</th><th>输入 / 输出 Token</th><th>用量已知调用</th></tr></thead>
+          <tbody><tr v-for="metric in stats.metrics" :key="metric.service">
+            <td>{{ serviceName[metric.service] || metric.service }}</td><td>{{ metric.requests }}</td><td>{{ metric.errors }}</td><td>{{ metric.cacheHits }}</td>
+            <td>{{ metric.requests ? `${Math.round(metric.durationMs / metric.requests)} ms` : '—' }}</td>
+            <td>{{ metric.usageSamples ? `${metric.inputTokens} / ${metric.outputTokens}` : '未知' }}</td><td>{{ metric.usageSamples }} / {{ metric.requests }}</td>
+          </tr></tbody>
+        </table>
+        <h2>最近生成任务</h2>
+        <table class="admin__table">
+          <thead><tr><th>请求编号</th><th>规划</th><th>状态</th><th>完成步骤</th><th>更新时间</th><th>错误类型</th></tr></thead>
+          <tbody><tr v-for="run in stats.recentRuns" :key="`${run.conversationId}-${run.requestId}`">
+            <td class="admin__key">{{ run.requestId }}</td><td>{{ run.planId }}</td><td>{{ statusName[run.status] || run.status }}</td><td>{{ run.steps }}</td><td>{{ formatDateTime(run.updatedAt) }}</td><td>{{ run.errorCode || '—' }}</td>
+          </tr></tbody>
+        </table>
       </section>
 
       <section v-if="tab === 'users'" class="admin__table-wrap">

@@ -115,8 +115,12 @@ function issueParts(issue: z.core.$ZodIssue): { message: string; hint: string } 
     }
   }
   if (issue.code === 'invalid_type') {
+    if (path.at(-1) === 'meals') return { message: 'meals 必须是字符串数组', hint: '例如 ["午餐建议", "晚餐建议"]，不要传入一段字符串' }
     if (path.at(-1) === 'rating') return { message: issue.message, hint: '未评分请填 0，不要用 null' }
     if (path.at(-1) === 'breakdown') return { message: issue.message, hint: 'breakdown 须为 { "分类": 金额 } 对象' }
+  }
+  if (issue.code === 'invalid_value' && path.at(-1) === 'meal') {
+    return { message: 'meal 餐次值不受支持', hint: '只能填写 breakfast、lunch、dinner 或 snack' }
   }
   return { message: issue.message, hint: '' }
 }

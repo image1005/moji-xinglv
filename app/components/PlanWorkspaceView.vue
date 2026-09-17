@@ -14,17 +14,28 @@ const tab = computed({
   set: (value: TabKey) => { if (currentPlan.value) selectedTabs[currentPlan.value.id] = value },
 })
 const viewKey = computed(() => `${currentPlan.value?.id ?? 'empty'}:${tab.value}`)
+const tabId = (key: TabKey) => `plan-tab-${currentPlan.value?.id ?? 'empty'}-${key}`
+function onTabKeydown(event: KeyboardEvent, key: TabKey) {
+  const index = tabs.findIndex((item) => item.key === key)
+  const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+    : event.key === 'ArrowLeft' ? (index + tabs.length - 1) % tabs.length
+      : event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : -1
+  if (next < 0 || !currentPlan.value) return
+  event.preventDefault()
+  tab.value = tabs[next]!.key
+  void nextTick(() => document.getElementById(tabId(tab.value))?.focus())
+}
 </script>
 
 <template>
   <section class="plan-view">
     <nav class="plan-view__tabs" aria-label="行笺内容" role="tablist">
-      <button v-for="item in tabs" :key="item.key" class="plan-view__tab" :class="{ 'plan-view__tab--active': tab === item.key }" role="tab" :aria-selected="tab === item.key" :disabled="!currentPlan" @click="tab = item.key"><AppIcon :name="item.icon" :size="15" />{{ item.label }}</button>
+      <button v-for="item in tabs" :id="tabId(item.key)" :key="item.key" class="plan-view__tab" :class="{ 'plan-view__tab--active': tab === item.key }" role="tab" :aria-selected="tab === item.key" :aria-controls="`${tabId(item.key)}-panel`" :tabindex="tab === item.key ? 0 : -1" :disabled="!currentPlan" @keydown="onTabKeydown($event, item.key)" @click="tab = item.key"><AppIcon :name="item.icon" :size="15" />{{ item.label }}</button>
     </nav>
-    <div class="plan-view__body">
+    <div :id="`${tabId(tab)}-panel`" class="plan-view__body" role="tabpanel" :aria-labelledby="tabId(tab)">
       <div v-if="!currentPlan" class="empty-state"><p class="eyebrow">行笺待启</p><h3>将向往，写成行程。</h3><p>在左侧选择一份行笺，或和 AI 聊聊你想去的地方。</p><button class="btn btn--seal" @click="mainMode = 'chat'">开始旅途对话<AppIcon name="arrow" :size="14" /></button></div>
       <KeepAlive :max="36">
-        <ItineraryView v-if="currentPlan && tab === 'detail'" :key="viewKey" />
+        <ItineraryView v-if="currentPlan && tab === 'detail'" :key="viewKey" @edit-map="tab = 'map'" />
         <MapView v-else-if="currentPlan && tab === 'map'" :key="viewKey" />
         <FoodJournalView v-else-if="currentPlan && tab === 'food'" :key="viewKey" />
         <PanoramaView v-else-if="currentPlan && tab === 'panorama'" :key="viewKey" />

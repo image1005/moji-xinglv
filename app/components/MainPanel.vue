@@ -1,7 +1,8 @@
 <script setup lang="ts">
 const {
-  mainMode, currentPlan, currentConversationId, conversations, uiLeftOpen, loading,
+  mainMode, currentPlan, currentConversationId, conversations, uiLeftOpen, loading, chat, stop, offline, refreshCurrentPlan,
 } = useWorkspace()
+const generating = computed(() => chat.value?.status === 'streaming' || chat.value?.status === 'submitted')
 const conversation = computed(() => conversations.value.find((c) => c.id === currentConversationId.value) ?? null)
 const title = computed(() => {
   if (mainMode.value === 'settings') return '偏好与设置'
@@ -19,15 +20,17 @@ const title = computed(() => {
         <div class="main__title"><h2>{{ title }}</h2><span v-if="mainMode === 'plan' && currentPlan" class="main__badge">v{{ currentPlan.version }}</span></div>
       </div>
       <div class="main__actions">
+        <button v-if="generating" class="btn btn--small" @click="stop">正在生成 · 停止</button>
         <span v-if="loading" class="main__status" role="status">正在整理行笺…</span>
         <span v-else-if="mainMode === 'chat'" class="main__status"><span />你的 AI 旅行知己</span>
       </div>
     </header>
+    <div v-if="offline" class="feedback" role="status">当前显示最近保存的离线快照，编辑草稿会保留。<button class="btn btn--small" @click="refreshCurrentPlan">重新连接</button></div>
     <div class="main__body" :aria-busy="loading">
       <KeepAlive :max="3">
         <ConversationView v-if="mainMode === 'chat'" key="chat" />
-        <PlanWorkspaceView v-else-if="mainMode === 'plan'" key="plan" />
-        <SettingsView v-else key="settings" />
+        <LazyPlanWorkspaceView v-else-if="mainMode === 'plan'" key="plan" />
+        <LazySettingsView v-else key="settings" />
       </KeepAlive>
     </div>
   </section>

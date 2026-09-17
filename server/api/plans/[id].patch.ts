@@ -13,6 +13,7 @@ const BodySchema = z.object({
   budget: BudgetSchema.optional(),
   contentMd: z.string().max(50000).optional(),
   expectedVersion: z.number().int().nonnegative().optional(),
+  expectedRevision: z.number().int().positive().optional(),
 })
 
 export default defineEventHandler(async (event) => {
@@ -21,5 +22,5 @@ export default defineEventHandler(async (event) => {
   if (!Number.isSafeInteger(id) || id <= 0) throw createError({ statusCode: 400, statusMessage: 'id 不合法' })
   const body = await readValidatedBody(event, BodySchema.parse)
   const result = await updatePlanMeta(user.id, id, body)
-  return { ok: true, version: result.version }
+  return { ok: true, version: result.version, revision: result.revision, plan: result.plan, contentMd: result.contentMd, skipped: result.skipped }
 })
