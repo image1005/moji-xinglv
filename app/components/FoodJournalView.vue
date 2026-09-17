@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { FoodEntrySchema, PlanSchema, type FoodEntry, type Plan } from '#shared/schemas/plan'
-import { apiErrorMessage } from '~/utils/api'
+import { api, apiErrorMessage, type PlanDetail } from '~/utils/api'
+import { isDraftForm, mergeDraftFields, type DraftDifference } from '~/utils/draft-merge'
 
-const { currentPlan, savePlan, errorMessage, loading } = useWorkspace()
+const ws = useWorkspace()
+const { savePlan, errorMessage, loading } = ws
+const currentPlan = useBoundPlan()
 const query = ref('')
 const filter = ref<'all' | FoodEntry['status']>('all')
 const saving = ref(false)
@@ -21,14 +24,70 @@ const mealNames: Record<FoodEntry['meal'], string> = { breakfast: '早餐', lunc
 const mealMarks: Record<FoodEntry['meal'], string> = { breakfast: '晨', lunch: '午', dinner: '暮', snack: '闲' }
 const filters = [{ value: 'all', label: '全部风味' }, { value: 'wishlist', label: '想尝尝' }, { value: 'tasted', label: '已尝过' }] as const
 
-type Snapshot = { planId: number; version: number; plan: Plan }
+type Snapshot = { planId: number; version: number; revision: number; plan: Plan }
 const editor = shallowRef<(Snapshot & { entryId: string | null }) | null>(null)
 const form = reactive({ name: '', restaurant: '', city: '', address: '', date: '', meal: 'snack' as FoodEntry['meal'], status: 'wishlist' as FoodEntry['status'], cost: '0', rating: '0', notes: '', tags: '' })
 let scope = 0
+const latest = shallowRef<PlanDetail | null>(null)
+const differences = ref<DraftDifference[] | null>(null)
+type FoodDraft = { editor: NonNullable<typeof editor.value>; form: typeof form }
+const draft = usePlanDraft<FoodDraft>(currentPlan.value?.id, 'food-editor', (value) => {
+  const data = value as FoodDraft | null
+  return data && data.editor && data.editor.planId === currentPlan.value?.id && Number.isInteger(data.editor.revision) && Number.isInteger(data.editor.version)
+    && (data.editor.entryId === null || typeof data.editor.entryId === 'string')
+    && PlanSchema.safeParse(data.editor.plan).success && isDraftForm(data.form, form) ? data : null
+})
+watch([editor, form], () => {
+  if (editor.value) draft.save({ editor: editor.value, form: { ...form } })
+  differences.value = null
+}, { deep: true, flush: 'sync' })
+onMounted(() => {
+  const value = draft.restore()
+  if (!value) return
+  Object.assign(form, value.form)
+  editor.value = value.editor
+})
+function cancelEditor() {
+  editor.value = null
+  draft.clear()
+  failure.value = ''
+  latest.value = null
+  differences.value = null
+}
+function entryFields(entry?: FoodEntry) {
+  return { name: entry?.name ?? '', restaurant: entry?.restaurant ?? '', city: entry?.city ?? '', address: entry?.address ?? '', date: entry?.date ?? '', meal: entry?.meal ?? 'snack' as FoodEntry['meal'], status: entry?.status ?? 'wishlist' as FoodEntry['status'], cost: String(entry?.cost ?? 0), rating: String(entry?.rating ?? 0), notes: entry?.notes ?? '', tags: (entry?.tags ?? []).join('、') }
+}
+const labels = { name: '菜名', restaurant: '餐厅', city: '城市', address: '地址', date: '日期', meal: '餐次', status: '状态', cost: '花费', rating: '评分', notes: '笔记', tags: '标签' }
+function mergeEditor(plan: Plan) {
+  const base = editor.value!
+  return mergeDraftFields(entryFields(base.plan.foodJournal.find((item) => item.id === base.entryId)), { ...form }, entryFields(plan.foodJournal.find((item) => item.id === base.entryId)), labels)
+}
+async function compareLatest() {
+  if (!editor.value || busy.value) return
+  try {
+    latest.value = await api.plans.detail(editor.value.planId)
+    differences.value = mergeEditor(latest.value.plan).differences
+  } catch (error) { failure.value = apiErrorMessage(error) }
+}
+function reapplyDraft() {
+  const base = editor.value
+  const current = latest.value
+  if (!base || !current) return
+  if (base.entryId && !current.plan.foodJournal.some((item) => item.id === base.entryId)) {
+    failure.value = '这条记录已被删除。草稿仍保留，请核对后新建一条记录。'
+    return
+  }
+  Object.assign(form, mergeEditor(current.plan).merged)
+  editor.value = { ...base, version: current.version, revision: current.revision, plan: PlanSchema.parse(current.plan) }
+  differences.value = null
+  latest.value = null
+  failure.value = ''
+  feedback.value = '草稿已应用到最新内容，请检查后保存。'
+}
 
 function snapshot(): Snapshot | null {
   const current = currentPlan.value
-  return current ? { planId: current.id, version: current.version, plan: PlanSchema.parse(current.plan) } : null
+  return current ? { planId: current.id, version: current.version, revision: current.revision, plan: PlanSchema.parse(current.plan) } : null
 }
 
 function clearNotice() {
@@ -53,12 +112,12 @@ function openEditor(entryId: string | null = null) {
 }
 
 async function persist(base: Snapshot, next: Plan, message: string) {
-  if (busy.value || currentPlan.value?.id !== base.planId) return false
+  if (busy.value || ws.currentPlan.value?.id !== base.planId) return false
   const token = scope
   saving.value = true
   clearNotice()
   try {
-    const result = await savePlan(next, base.version)
+    const result = await savePlan(next, base.version, base.revision)
     if (token !== scope || currentPlan.value?.id !== base.planId) return false
     if (!result) {
       failure.value = errorMessage.value || '未能保存，请稍后重试。草稿仍保留。'
@@ -93,6 +152,7 @@ async function submit() {
   else next.foodJournal[index] = result.data
   if (await persist(base, next, base.entryId ? '风味记录已更新' : '风味记录已添入')) {
     if (editor.value === base) editor.value = null
+    draft.clear()
   }
 }
 
@@ -115,14 +175,6 @@ async function removeEntry(id: string) {
   await persist(base, base.plan, '风味记录已删除')
 }
 
-watch(() => currentPlan.value?.id, () => {
-  scope++
-  saving.value = false
-  editor.value = null
-  query.value = ''
-  filter.value = 'all'
-  clearNotice()
-}, { flush: 'sync' })
 onBeforeUnmount(() => { scope++ })
 </script>
 
@@ -147,7 +199,8 @@ onBeforeUnmount(() => { scope++ })
 
       <form v-if="editor" class="food-journal__editor" @submit.prevent="submit">
         <div class="food-journal__editor-heading"><h3>{{ editor.entryId ? '重温这一味' : '留下一味烟火' }}</h3><span>基于 v{{ editor.version }}</span></div>
-        <p v-if="currentPlan.version !== editor.version" class="food-journal__warning">行笺已有新版本。本草稿不会覆盖它；请保留所填内容，取消后重新打开编辑。</p>
+        <p v-if="currentPlan.revision > editor.revision" class="food-journal__warning">行笺已有更新。草稿仍保留，请比较最新内容后明确重新应用。</p>
+        <DraftRecovery :persisted="draft.persisted.value" :storage-error="draft.storageError.value" :busy="busy" :differences="differences" @compare="compareLatest" @reapply="reapplyDraft" />
         <fieldset :disabled="busy">
           <label class="food-journal__wide">菜名 / 风味名称 <span>必填</span><input v-model="form.name" required maxlength="200" placeholder="例如：一碗片儿川" ></label>
           <label>餐厅 / 小店<input v-model="form.restaurant" maxlength="200" placeholder="想去的店，或偶遇的摊" ></label>
@@ -162,7 +215,7 @@ onBeforeUnmount(() => { scope++ })
           <p class="food-journal__hint">默认记为「想尝尝」，只有你确认后才算尝过。日期可以留白，评分由你决定。</p>
           <label class="food-journal__wide">风味笔记<textarea v-model="form.notes" rows="4" maxlength="4000" placeholder="味道如何、想点什么、忌口提醒，或与谁分享…" /></label>
         </fieldset>
-        <div class="food-journal__editor-actions"><button type="button" :disabled="busy" @click="editor = null; failure = ''">取消</button><button type="submit" class="food-journal__seal" :disabled="busy">{{ saving ? '正在落笔…' : '保存这一味' }}</button></div>
+        <div class="food-journal__editor-actions"><button type="button" :disabled="busy" @click="cancelEditor">丢弃草稿</button><button type="submit" class="food-journal__seal" :disabled="busy">{{ saving ? '正在落笔…' : '保存这一味' }}</button></div>
       </form>
       <p v-if="failure" class="food-journal__failure" role="alert">{{ failure }}</p>
       <p v-if="feedback" class="food-journal__feedback" role="status">{{ feedback }}</p>

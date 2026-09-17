@@ -63,22 +63,20 @@ describe('有副作用的路由先校验参数与作用域', () => {
     expect(write.mock.calls[0]!.at(-1)).toMatchObject({ expectedVersion: 2 })
     expect(mocks.appendMessage).not.toHaveBeenCalled()
   })
-  it('切换版本只移动指针并追加系统消息', async () => {
-    body = { version: 1, expectedVersion: 2, conversationId: 10 }
+  it('切换版本将会话与修订校验交给原子服务且不重复追加消息', async () => {
+    body = { version: 1, expectedVersion: 2, expectedRevision: 5, conversationId: 10 }
     mocks.getConversation.mockResolvedValue({ planId: 1 })
     mocks.switchToVersion.mockResolvedValue({
       planId: 1, version: 1, versionId: 7, switched: true, preview: { planId: 1, version: 1 },
     })
     await expect((await handler('switch'))({})).resolves.toMatchObject({ switched: true, version: 1 })
-    expect(mocks.switchToVersion).toHaveBeenCalledWith('owner', 1, 1, { expectedVersion: 2 })
-    expect(mocks.appendMessage).toHaveBeenCalledWith(10, expect.objectContaining({
-      role: 'system', content: expect.stringContaining('已切换到 v1'), planVersionId: 7,
-    }))
+    expect(mocks.switchToVersion).toHaveBeenCalledWith('owner', 1, 1, { expectedVersion: 2, expectedRevision: 5, conversationId: 10 })
+    expect(mocks.appendMessage).not.toHaveBeenCalled()
   })
   it('规划资料 PATCH 透传扩展字段并拒绝非法预算', async () => {
     body = { title: '新标题', summary: '摘要', cover: 'https://example.test/cover.jpg', tags: ['江南'], tips: ['带伞'], budget: { total: 1200, currency: 'CNY' }, expectedVersion: 3 }
     mocks.updatePlanMeta.mockResolvedValue({ version: 4 })
-    await expect((await handler('patch'))({})).resolves.toEqual({ ok: true, version: 4 })
+    await expect((await handler('patch'))({})).resolves.toMatchObject({ ok: true, version: 4 })
     expect(mocks.updatePlanMeta).toHaveBeenCalledWith('owner', 1, body)
     for (const invalid of [{ budget: { total: -1, currency: 'CNY' } }, { tags: ['a'.repeat(41)] }, { budget: { total: 1, currency: 'cny' } }]) {
       body = invalid

@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { DaySchema, PlanSchema, SpotSchema, type Plan, type Spot } from '#shared/schemas/plan'
 import { hasCoordinates, MAP_PAGE_SIZE, markerLabels, mapViewport, routeDistance, staticMapUrl } from '#shared/utils/routes'
-import { apiErrorMessage } from '~/utils/api'
+import { api, apiErrorMessage, type PlanDetail } from '~/utils/api'
+import { isDraftForm, mergeDraftFields, type DraftDifference } from '~/utils/draft-merge'
 
-const { currentPlan, savePlan, errorMessage, loading } = useWorkspace()
+const ws = useWorkspace()
+const { savePlan, errorMessage, loading } = ws
+const currentPlan = useBoundPlan()
 const dayIndex = ref(0)
 const page = ref(0)
 const selectedIndex = ref<number | null>(null)
@@ -41,16 +44,92 @@ const url = computed(() => {
   return `/api/staticmap?${params.toString()}`
 })
 
-type Snapshot = { planId: number; version: number; plan: Plan }
+type Snapshot = { planId: number; version: number; revision: number; plan: Plan }
 type Editor = Snapshot & { kind: 'spot' | 'day'; dayIndex: number; spotIndex: number | null }
 const editor = shallowRef<Editor | null>(null)
 const spotForm = reactive({ name: '', time: '', address: '', notes: '', imageUrl: '', category: 'sight' as Spot['category'], lng: '', lat: '', cost: '0', durationMinutes: '60' })
 const dayForm = reactive({ date: '', city: '', transport: '', lodging: '', meals: '' })
 let scope = 0
+const latest = shallowRef<PlanDetail | null>(null)
+const differences = ref<DraftDifference[] | null>(null)
+type MapDraft = { editor: Editor; spotForm: typeof spotForm; dayForm: typeof dayForm }
+const draft = usePlanDraft<MapDraft>(currentPlan.value?.id, 'map-editor', (value) => {
+  const data = value as MapDraft | null
+  return data && data.editor && data.editor.planId === currentPlan.value?.id && Number.isInteger(data.editor.revision) && Number.isInteger(data.editor.version)
+    && Number.isInteger(data.editor.dayIndex) && data.editor.dayIndex >= 0
+    && (data.editor.kind === 'day' || data.editor.kind === 'spot')
+    && (data.editor.spotIndex === null || Number.isInteger(data.editor.spotIndex) && data.editor.spotIndex >= 0)
+    && PlanSchema.safeParse(data.editor.plan).success && isDraftForm(data.spotForm, spotForm) && isDraftForm(data.dayForm, dayForm) ? data : null
+})
+watch([editor, spotForm, dayForm], () => {
+  if (editor.value) draft.save({ editor: editor.value, spotForm: { ...spotForm }, dayForm: { ...dayForm } })
+  differences.value = null
+}, { deep: true, flush: 'sync' })
+onMounted(() => {
+  const value = draft.restore()
+  if (!value) return
+  Object.assign(spotForm, value.spotForm)
+  Object.assign(dayForm, value.dayForm)
+  editor.value = value.editor
+  dayIndex.value = value.editor.dayIndex
+})
+
+function cancelEditor() {
+  editor.value = null
+  draft.clear()
+  latest.value = null
+  differences.value = null
+  failure.value = ''
+}
+
+const spotLabels = { name: '地点名称', time: '时间', address: '地址', notes: '随手记', imageUrl: '图片', category: '类型', lng: '经度', lat: '纬度', cost: '花费', durationMinutes: '停留时长' }
+const dayLabels = { date: '日期', city: '城市', transport: '交通', lodging: '住宿', meals: '用餐' }
+function spotFields(spot?: Spot) {
+  return { name: spot?.name ?? '', time: spot?.time ?? '', address: spot?.address ?? '', notes: spot?.notes ?? '', imageUrl: spot?.imageUrl ?? '', category: spot?.category ?? 'sight' as Spot['category'], lng: spot?.lng == null ? '' : String(spot.lng), lat: spot?.lat == null ? '' : String(spot.lat), cost: String(spot?.cost ?? 0), durationMinutes: String(spot?.durationMinutes ?? 60) }
+}
+function dayFields(day?: Plan['days'][number]) {
+  return { date: day?.date ?? '', city: day?.city ?? '', transport: day?.transport ?? '', lodging: day?.lodging ?? '', meals: (day?.meals ?? []).join('\n') }
+}
+function mergeEditor(plan: Plan) {
+  const base = editor.value!
+  const oldDay = base.plan.days[base.dayIndex]
+  const newDay = plan.days[base.dayIndex]
+  if (base.kind === 'day') return { day: mergeDraftFields(dayFields(oldDay), { ...dayForm }, dayFields(oldDay ? newDay : undefined), dayLabels), spot: null }
+  const index = base.spotIndex
+  return { day: null, spot: mergeDraftFields(spotFields(index === null ? undefined : oldDay?.spots[index]), { ...spotForm }, spotFields(index === null ? undefined : newDay?.spots[index]), spotLabels) }
+}
+async function compareLatest() {
+  if (!editor.value || busy.value) return
+  try {
+    latest.value = await api.plans.detail(editor.value.planId)
+    const result = mergeEditor(latest.value.plan)
+    differences.value = result.day?.differences ?? result.spot?.differences ?? []
+  } catch (error) { failure.value = apiErrorMessage(error) }
+}
+function reapplyDraft() {
+  const base = editor.value
+  const current = latest.value
+  if (!base || !current) return
+  const oldDay = base.plan.days[base.dayIndex]
+  const newDay = current.plan.days[base.dayIndex]
+  if (oldDay && (!newDay || oldDay.date !== newDay.date || oldDay.city !== newDay.city)
+    || base.kind === 'spot' && base.spotIndex !== null && oldDay?.spots[base.spotIndex]?.name !== newDay?.spots[base.spotIndex]?.name) {
+    failure.value = '原日期或地点的名称、顺序已变化，无法安全定位。草稿已保留，请先核对行程后手工重新选择目标。'
+    return
+  }
+  const result = mergeEditor(current.plan)
+  if (result.day) Object.assign(dayForm, result.day.merged)
+  if (result.spot) Object.assign(spotForm, result.spot.merged)
+  editor.value = { ...base, plan: PlanSchema.parse(current.plan), version: current.version, revision: current.revision, dayIndex: !oldDay && base.kind === 'day' ? current.plan.days.length : base.dayIndex }
+  differences.value = null
+  latest.value = null
+  failure.value = ''
+  feedback.value = '草稿已应用到最新内容，请检查表单后保存。'
+}
 
 function snapshot(): Snapshot | null {
   const current = currentPlan.value
-  return current ? { planId: current.id, version: current.version, plan: PlanSchema.parse(current.plan) } : null
+  return current ? { planId: current.id, version: current.version, revision: current.revision, plan: PlanSchema.parse(current.plan) } : null
 }
 
 function clearNotice() {
@@ -88,12 +167,12 @@ function openDay(isNew: boolean) {
 }
 
 async function persist(base: Snapshot, next: Plan, message: string) {
-  if (busy.value || currentPlan.value?.id !== base.planId) return false
+  if (busy.value || ws.currentPlan.value?.id !== base.planId) return false
   const token = scope
   saving.value = true
   clearNotice()
   try {
-    const result = await savePlan(next, base.version)
+    const result = await savePlan(next, base.version, base.revision)
     if (token !== scope || currentPlan.value?.id !== base.planId) return false
     if (!result) {
       failure.value = errorMessage.value || '未能保存，请稍后重试。草稿仍保留。'
@@ -147,6 +226,7 @@ async function submitEditor() {
     page.value = base.kind === 'spot' && base.spotIndex === null
       ? Math.floor(((next.days[base.dayIndex]?.spots.length ?? 1) - 1) / MAP_PAGE_SIZE) : page.value
     editor.value = null
+    draft.clear()
   }
 }
 
@@ -188,15 +268,6 @@ watch(() => currentPlan.value?.version, () => {
   page.value = Math.min(page.value, pageCount.value - 1)
   restoreOverview()
 })
-watch(() => currentPlan.value?.id, () => {
-  scope++
-  editor.value = null
-  saving.value = false
-  dayIndex.value = 0
-  page.value = 0
-  restoreOverview()
-  clearNotice()
-}, { flush: 'sync' })
 onBeforeUnmount(() => { scope++ })
 </script>
 
@@ -256,7 +327,8 @@ onBeforeUnmount(() => { scope++ })
 
       <form v-if="editor" class="map-view__editor" @submit.prevent="submitEditor">
         <div class="map-view__editor-title"><h3>{{ editor.kind === 'day' ? '记下一日' : editor.spotIndex === null ? '添一处沿途风景' : '编辑地点' }}</h3><span>基于 v{{ editor.version }}</span></div>
-        <p v-if="currentPlan.version !== editor.version" class="map-view__warning">行笺已有新版本。本草稿不会覆盖它；请取消并重新打开编辑，或保留内容后再处理。</p>
+        <p v-if="currentPlan.revision > editor.revision" class="map-view__warning">行笺已有更新。草稿仍保留，请比较最新内容后明确重新应用。</p>
+        <DraftRecovery :persisted="draft.persisted.value" :storage-error="draft.storageError.value" :busy="busy" :differences="differences" @compare="compareLatest" @reapply="reapplyDraft" />
         <fieldset :disabled="busy">
           <template v-if="editor.kind === 'day'">
             <label>日期<input v-model="dayForm.date" type="date" ></label>
@@ -279,7 +351,7 @@ onBeforeUnmount(() => { scope++ })
             <label class="map-view__wide">随手记<textarea v-model="spotForm.notes" rows="3" maxlength="4000" placeholder="预约、开门时间，或值得期待的小事" /></label>
           </template>
         </fieldset>
-        <div class="map-view__editor-actions"><button type="button" :disabled="busy" @click="editor = null; failure = ''">取消</button><button type="submit" class="map-view__seal" :disabled="busy">{{ saving ? '正在落笔…' : '保存为新版本' }}</button></div>
+        <div class="map-view__editor-actions"><button type="button" :disabled="busy" @click="cancelEditor">丢弃草稿</button><button type="submit" class="map-view__seal" :disabled="busy">{{ saving ? '正在落笔…' : '保存为新版本' }}</button></div>
       </form>
       <p v-if="failure" class="map-view__failure" role="alert">{{ failure }}</p>
       <p v-if="feedback" class="map-view__feedback" role="status">{{ feedback }}</p>

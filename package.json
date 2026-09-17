@@ -1,6 +1,8 @@
 {
   "name": "shanhai-xingjian",
-  "engines": { "bun": ">=1.4.0" },
+  "engines": {
+    "bun": ">=1.4.0"
+  },
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,11 +13,19 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run server/database/migrate.ts",
     "db:seed": "bun run server/database/seed.ts",
+    "db:backup": "bun run scripts/db-backup.ts",
+    "db:restore:verify": "bun run scripts/db-restore-verify.ts",
     "lint": "eslint .",
-    "typecheck": "bun --bun nuxt typecheck",
+    "typecheck": "bun --bun nuxt typecheck && bun run typecheck:scripts",
+    "typecheck:scripts": "bun --bun tsc --project tsconfig.scripts.json --noEmit",
     "test": "vitest run",
     "check": "bun run lint && bun run typecheck && bun run test",
+    "check:release": "bun run check && bun run build && bun run test:integration && bun run test:recovery && bun run test:browser",
     "smoke": "bun run scripts/smoke.ts",
+    "test:integration": "bun run scripts/verify-isolated.ts",
+    "test:browser": "bun run scripts/test-browser.ts",
+    "test:recovery": "bun run scripts/test-recovery.ts",
+    "eval:ai": "bun run scripts/eval-ai.ts",
     "preview:readme": "bun run scripts/preview-readme.ts"
   },
   "dependencies": {
@@ -32,6 +42,7 @@
   },
   "devDependencies": {
     "@nuxt/eslint": "^1.17.0",
+    "@playwright/test": "^1.63.0",
     "@types/bun": "^1.3.0",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9.39.0",

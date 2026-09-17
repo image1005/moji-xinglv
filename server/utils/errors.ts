@@ -6,6 +6,8 @@
 const ACTIONABLE_PREFIX = '[actionable]'
 const MAX_LENGTH = 400
 
+class ActionableToolError extends Error {}
+
 export function sanitizeToolError(text: string): string {
   let clean = ''
   for (const char of text) {
@@ -26,7 +28,19 @@ export function actionableMessage(error: unknown): string | null {
 }
 
 export function markActionable(message: string): Error {
-  return new Error(`${ACTIONABLE_PREFIX} ${sanitizeToolError(message)}`)
+  return new ActionableToolError(`${ACTIONABLE_PREFIX} ${sanitizeToolError(message)}`)
+}
+
+/** Mastra 会用 Error.cause 包装工具异常；只放行应用标记的错误，拒绝上游伪造相同文本前缀。 */
+export function preserveActionableError(error: unknown): string | null {
+  let current = error
+  const seen = new Set<unknown>()
+  for (let depth = 0; depth < 8 && current instanceof Error && !seen.has(current); depth++) {
+    if (current instanceof ActionableToolError) return current.message
+    seen.add(current)
+    current = current.cause
+  }
+  return null
 }
 
 export function extractActionable(errorText: unknown): string | null {

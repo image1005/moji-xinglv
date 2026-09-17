@@ -7,6 +7,7 @@ import { blob, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-or
 import { user } from './auth-schema'
 
 export * from './auth-schema'
+export * from './operations'
 
 const now = () => new Date()
 
@@ -24,13 +25,15 @@ export const plans = sqliteTable(
     coverUrl: text('cover_url').notNull().default(''),
     /** 当前版本指针（plan_versions.id）；切换历史版本只改指针，不新建版本。 */
     currentVersionId: integer('current_version_id'),
+    /** 内容或当前指针每次变化递增；与可复用的展示版本号分开。 */
+    revision: integer('revision').notNull().default(1),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
     updatedAt: integer('updated_at', { mode: 'timestamp_ms' })
       .notNull()
       .$defaultFn(now)
       .$onUpdate(now),
   },
-  (t) => [index('plans_user_updated_idx').on(t.userId, t.updatedAt)],
+  (t) => [index('plans_user_updated_idx').on(t.userId, t.updatedAt, t.id)],
 )
 
 export const planVersions = sqliteTable(
@@ -49,7 +52,10 @@ export const planVersions = sqliteTable(
     diffJson: text('diff_json', { mode: 'json' }),
     messageId: integer('message_id'),
   },
-  (t) => [uniqueIndex('plan_versions_plan_version_uq').on(t.planId, t.version)],
+  (t) => [
+    uniqueIndex('plan_versions_plan_version_uq').on(t.planId, t.version),
+    index('plan_versions_turn_idx').on(t.planId, t.messageId, t.source, t.version),
+  ],
 )
 
 export const panoramas = sqliteTable(
@@ -72,7 +78,7 @@ export const cache = sqliteTable('cache', {
   type: text('type').notNull().default('json'),
   expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
-})
+}, (t) => [index('cache_expires_idx').on(t.expiresAt)])
 
 export const conversations = sqliteTable(
   'conversations',
@@ -91,7 +97,10 @@ export const conversations = sqliteTable(
       .$defaultFn(now)
       .$onUpdate(now),
   },
-  (t) => [index('conversations_plan_idx').on(t.planId, t.updatedAt)],
+  (t) => [
+    index('conversations_plan_idx').on(t.planId, t.updatedAt, t.id),
+    index('conversations_user_updated_idx').on(t.userId, t.updatedAt, t.id),
+  ],
 )
 
 export const messages = sqliteTable(
@@ -108,7 +117,7 @@ export const messages = sqliteTable(
     planVersionId: integer('plan_version_id'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
   },
-  (t) => [index('messages_conversation_idx').on(t.conversationId, t.createdAt)],
+  (t) => [index('messages_conversation_idx').on(t.conversationId, t.createdAt, t.id)],
 )
 
 export const agentsMd = sqliteTable(

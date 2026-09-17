@@ -2,12 +2,26 @@
 import { api } from '~/utils/api'
 import { hasCoordinates } from '#shared/utils/routes'
 
-const { currentPlan } = useWorkspace()
+const currentPlan = useBoundPlan()
 
 const spots = computed(() => currentPlan.value?.plan.days.flatMap((d) => d.spots) ?? [])
 const index = ref(0)
 const heading = ref(0)
 const fov = ref(90)
+const committedHeading = ref(0)
+const committedFov = ref(90)
+let timer: ReturnType<typeof setTimeout> | undefined
+let active = true
+function commitAngle() {
+  clearTimeout(timer)
+  if (!active) return
+  committedHeading.value = heading.value
+  committedFov.value = fov.value
+}
+watch([heading, fov], () => { clearTimeout(timer); if (active) timer = setTimeout(commitAngle, 250) })
+onDeactivated(() => { active = false; clearTimeout(timer) })
+onActivated(() => { active = true; commitAngle() })
+onBeforeUnmount(() => clearTimeout(timer))
 
 const spot = computed(() => spots.value[index.value] ?? null)
 
@@ -15,8 +29,8 @@ const url = computed(() => {
   if (!spot.value || !hasCoordinates(spot.value)) return ''
   return api.panoramaUrl({
     location: `${spot.value.lng},${spot.value.lat}`,
-    heading: heading.value,
-    fov: fov.value,
+    heading: committedHeading.value,
+    fov: committedFov.value,
     width: 800,
     height: 480,
   })
@@ -36,6 +50,7 @@ watch(() => spots.value.length, (length) => {
 watch(index, () => {
   heading.value = 0
   fov.value = 90
+  commitAngle()
 })
 </script>
 
@@ -59,15 +74,15 @@ watch(index, () => {
       <div class="panorama-view__sliders">
         <label>
           视角 {{ heading }}°
-          <input v-model.number="heading" type="range" min="0" max="360" step="5" :disabled="!url" >
+          <input v-model.number="heading" type="range" min="0" max="360" step="5" :disabled="!url" @change="commitAngle" >
         </label>
         <label>
           视野 {{ fov }}°
-          <input v-model.number="fov" type="range" min="20" max="180" step="5" :disabled="!url" >
+          <input v-model.number="fov" type="range" min="20" max="180" step="5" :disabled="!url" @change="commitAngle" >
         </label>
       </div>
       <p class="panorama-view__note">
-        百度官方街景经服务端代理与缓存，不向浏览器暴露密钥；图像覆盖和拍摄时间由服务提供方决定。暂缺图像不影响手工编辑行程。
+        拖动滑块调整视角，停下后更新画面。图像覆盖和拍摄时间由服务提供方决定，暂缺图像不影响编辑行程。
       </p>
     </template>
   </div>

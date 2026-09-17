@@ -9,10 +9,24 @@ const ws = useWorkspace()
 const busy = ref(false)
 const copied = ref(false)
 const showDiff = ref(false)
+const expanded = ref(false)
+const loadingDiff = ref(false)
 const failure = ref('')
 const samePlan = computed(() => ws.currentPlan.value?.id === props.preview.planId)
 const currentPlanVersion = computed(() => (samePlan.value ? ws.currentPlan.value?.version : undefined))
 const diff = computed(() => samePlan.value ? ws.versions.value.find((v) => v.version === props.preview.version)?.diffJson ?? [] : [])
+const diffLoaded = computed(() => ws.versions.value.some((v) => v.version === props.preview.version))
+async function toggleDiff() {
+  showDiff.value = !showDiff.value
+  if (!showDiff.value || !samePlan.value || diffLoaded.value) return
+  loadingDiff.value = true
+  try {
+    await ws.loadVersions()
+    while (!diffLoaded.value && ws.versionsHasMore.value && samePlan.value && !ws.loadingVersions.value && !ws.offline.value) {
+      if (await ws.loadVersions(true) !== true) break
+    }
+  } finally { loadingDiff.value = false }
+}
 
 const panoramas = computed(() => {
   const spots = props.preview.days
@@ -40,7 +54,7 @@ async function copyJson() {
 }
 
 async function undo() {
-  if (busy.value || !samePlan.value || preview.version === ws.currentPlan.value?.version) return
+  if (busy.value || !samePlan.value || props.preview.version === ws.currentPlan.value?.version) return
   if (!window.confirm(`切换到 v${props.preview.version}？当前版本将变为 v${props.preview.version}，历史版本仍保留。`)) return
   busy.value = true
   try {
@@ -59,14 +73,15 @@ async function undo() {
       <span class="preview-card__source">{{ sourceLabel(preview.source) }}</span>
     </div>
     <p v-if="preview.summary" class="preview-card__summary">{{ preview.summary }}</p>
-    <ul v-if="preview.days.length" class="preview-card__days">
+    <button v-if="preview.days.length" class="preview-card__action" :aria-expanded="expanded" @click="expanded = !expanded">{{ preview.days.length }} 天行程 · {{ expanded ? '收起安排' : '展开安排' }}</button>
+    <ul v-if="expanded && preview.days.length" class="preview-card__days">
       <li v-for="(day, index) in preview.days" :key="index">
         <span class="preview-card__date">{{ day.date || `第 ${index + 1} 天` }}</span>
         <span v-if="day.city" class="preview-card__city">{{ day.city }}</span>
         <span class="preview-card__spots">{{ day.spots.map((s) => s.name).join(' · ') || '自由活动' }}</span>
       </li>
     </ul>
-    <div v-if="panoramas.length" class="preview-card__panoramas">
+    <div v-if="expanded && panoramas.length" class="preview-card__panoramas">
       <div v-for="(spot, index) in panoramas" :key="index" class="preview-card__thumb" :title="spot.name">
         <CachedImage :src="spot.panorama" :alt="`${spot.name} 街景`" />
       </div>
@@ -74,13 +89,15 @@ async function undo() {
     <p v-if="preview.message" class="preview-card__note">{{ preview.message }}</p>
     <div class="preview-card__actions">
       <button class="preview-card__action" @click="copyJson">{{ copied ? '已复制' : '复制 JSON' }}</button>
-      <button class="preview-card__action" @click="showDiff = !showDiff">变更 {{ diff.length }} 处</button>
+      <button class="preview-card__action" :disabled="loadingDiff || !samePlan || ws.offline.value" @click="toggleDiff">{{ loadingDiff ? '读取变更…' : diffLoaded ? `变更 ${diff.length} 处` : '查看变更' }}</button>
       <button class="preview-card__action" :disabled="busy || !samePlan || preview.version === currentPlanVersion" @click="undo">切换到此版本</button>
       <button class="preview-card__action preview-card__action--seal" :disabled="!samePlan || busy" @click="ws.savePlan()">保存当前规划</button>
     </div>
     <p v-if="failure" class="feedback" role="alert">{{ failure }}</p>
     <ul v-if="showDiff" class="preview-card__diff">
-      <li v-if="!diff.length">与上一版本相比无差异</li>
+      <li v-if="loadingDiff">正在读取历史变更…</li>
+      <li v-else-if="!diffLoaded">尚未取得该版本的变更信息，请重新打开所属行程后查看。</li>
+      <li v-else-if="!diff.length">与上一版本相比无差异</li>
       <li v-for="(entry, index) in diff.slice(0, 12)" :key="index">
         <code>{{ entry.path }}</code>
         <span v-if="entry.kind !== 'add'">{{ show(entry.before) }} →</span>

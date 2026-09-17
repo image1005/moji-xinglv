@@ -2,6 +2,7 @@ import { createError } from 'h3'
 import { PanoramaQuerySchema, StaticMapQuerySchema } from '../../shared/schemas/map'
 import { hashKey } from '../../shared/utils/hash'
 import { getCachedBinary, setCachedBinary } from './cache'
+import { recordMetric } from './metrics'
 
 /** 唯一可以读取百度 AK 的模块。仅允许两种图片接口，不透传任意 URL。 */
 const BAIDU_BASE = 'https://api.map.baidu.com'
@@ -23,28 +24,37 @@ function ak(): string {
   return value
 }
 
-async function fetchImage(api: 'staticimage/v2' | 'panorama/v2', params: Record<string, string>): Promise<ImageResult> {
+async function fetchImage(api: 'staticimage/v2' | 'panorama/v2', params: Record<string, string>, userId?: string): Promise<ImageResult> {
   // 在任何异步缓存/哈希之前登记请求，避免快速响应与哈希完成顺序造成击穿。
   const key = `${api}:${JSON.stringify(params)}`
   const existing = pending.get(key)
   if (existing) return existing
   if (pending.size >= 12) throw createError({ statusCode: 429, statusMessage: '地图请求较多，请稍后重试' })
-  const request = fetchImageUnshared(api, params)
+  const request = fetchImageUnshared(api, params, userId)
   pending.set(key, request)
   try { return await request } finally { pending.delete(key) }
 }
 
-async function fetchImageUnshared(api: 'staticimage/v2' | 'panorama/v2', params: Record<string, string>): Promise<ImageResult> {
+async function fetchImageUnshared(api: 'staticimage/v2' | 'panorama/v2', params: Record<string, string>, userId?: string): Promise<ImageResult> {
+  const service = api === 'panorama/v2' ? 'panorama' : 'staticmap'
+  const metric = (outcome: 'success' | 'error' | 'cache_hit', durationMs = 0) => {
+    try { recordMetric({ service, userId, outcome, durationMs }) }
+    catch { console.warn('[maps] 无法记录本次调用指标') }
+  }
   const hash = await hashKey(api, params)
   const cached = await getCachedBinary(hash)
   const cachedType = cached && imageType(cached)
   if (cached && cachedType && cached.length <= 8 * 1024 * 1024) {
+    metric('cache_hit')
     return { buffer: cached, contentType: cachedType, cached: true }
   }
-  return (async () => {
-    const url = new URL(`${BAIDU_BASE}/${api}`)
-    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
-    url.searchParams.set('ak', ak())
+  const url = new URL(`${BAIDU_BASE}/${api}`)
+  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value)
+  // Missing configuration and local cache failures are not external service calls.
+  url.searchParams.set('ak', ak())
+  const started = Date.now()
+  let result: ImageResult
+  try {
     let response: Response
     try { response = await fetch(url, { signal: AbortSignal.timeout(12000), redirect: 'error' }) }
     catch { throw createError({ statusCode: 502, statusMessage: '地图服务暂不可达，请稍后重试' }) }
@@ -77,30 +87,36 @@ async function fetchImageUnshared(api: 'staticimage/v2' | 'panorama/v2', params:
     } finally { reader.releaseLock() }
     const buffer = Buffer.concat(chunks)
     if (imageType(buffer) !== contentType) throw createError({ statusCode: 502, statusMessage: '地图影像格式不受支持' })
-    await setCachedBinary(hash, buffer, TTL)
-    return { buffer, contentType, cached: false }
-  })()
+    result = { buffer, contentType, cached: false }
+  } catch (error) {
+    metric('error', Date.now() - started)
+    throw error
+  }
+  metric('success', Date.now() - started)
+  // Persisting a valid upstream image is a separate local operation.
+  await setCachedBinary(hash, result.buffer, TTL)
+  return result
 }
 
 export interface PanoramaQuery {
   location: string; width: number; height: number; heading?: number; pitch?: number; fov?: number
 }
-export async function getPanoramaImage(input: PanoramaQuery): Promise<ImageResult> {
+export async function getPanoramaImage(input: PanoramaQuery, userId?: string): Promise<ImageResult> {
   const query = PanoramaQuerySchema.parse(input)
   const params: Record<string, string> = { location: query.location, width: String(query.width), height: String(query.height), coordtype: 'bd09ll' }
   for (const field of ['heading', 'pitch', 'fov'] as const) if (query[field] !== undefined) params[field] = String(query[field])
-  return fetchImage('panorama/v2', params)
+  return fetchImage('panorama/v2', params, userId)
 }
 
 export interface StaticMapQuery {
   center?: string; zoom?: number; width?: number; height?: number; scale?: number
   markers?: string[]; paths?: string[]; pathStyles?: string; markerStyles?: string
 }
-export async function getStaticMapImage(input: StaticMapQuery): Promise<ImageResult> {
+export async function getStaticMapImage(input: StaticMapQuery, userId?: string): Promise<ImageResult> {
   const query = StaticMapQuerySchema.parse(input)
   const params: Record<string, string> = { width: String(query.width), height: String(query.height) }
   for (const field of ['center', 'zoom', 'scale', 'pathStyles', 'markerStyles'] as const) if (query[field] !== undefined) params[field] = String(query[field])
   if (query.markers?.length) params.markers = query.markers.join('|')
   if (query.paths?.length) params.paths = query.paths.join('|')
-  return fetchImage('staticimage/v2', params)
+  return fetchImage('staticimage/v2', params, userId)
 }

@@ -2,7 +2,7 @@
 import { api, apiErrorMessage } from '~/utils/api'
 
 const props = defineProps<{ fixedScope?: 'plan' | 'global' }>()
-const { currentPlan } = useWorkspace()
+const currentPlan = useBoundPlan()
 const { user } = useCurrentUser()
 const scope = ref<'plan' | 'global'>(props.fixedScope ?? 'plan')
 const content = ref('')
@@ -19,6 +19,22 @@ let active = true
 let mounted = false
 let loadedTarget: number | null | undefined
 let loadedUser: string | undefined
+type PreferenceDraft = { content: string; baseline: string; version: number }
+function validateDraft(value: unknown): PreferenceDraft | null {
+  const draft = value as PreferenceDraft | null
+  return draft && typeof draft.content === 'string' && typeof draft.baseline === 'string' && Number.isInteger(draft.version) ? draft : null
+}
+const planDraft = usePlanDraft(currentPlan.value?.id, 'agents-md', validateDraft)
+const globalDraft = usePlanDraft(null, 'agents-md', validateDraft)
+const activeDraft = computed(() => scope.value === 'global' ? globalDraft : planDraft)
+const latest = ref<{ content: string; version: number } | null>(null)
+const differences = computed(() => latest.value ? [{ label: '旅行偏好', current: latest.value.content || '（留空）', draft: content.value || '（留空）' }] : null)
+watch(content, () => {
+  latest.value = null
+  if (loading.value || loadedTarget !== targetPlanId.value) return
+  if (content.value !== baseline.value) activeDraft.value.save({ content: content.value, baseline: baseline.value, version: version.value })
+  else activeDraft.value.clear()
+}, { flush: 'sync' })
 
 watch(() => props.fixedScope, (value) => {
   if (value) scope.value = value
@@ -27,21 +43,23 @@ watch(() => props.fixedScope, (value) => {
 async function load() {
   const token = ++request
   const planId = targetPlanId.value
+  loading.value = true
   content.value = ''
   baseline.value = ''
   version.value = 0
   status.value = ''
   saving.value = false
-  loading.value = false
   isError.value = false
-  if (!import.meta.client || planId === undefined || !user.value) return
+  if (!import.meta.client || planId === undefined || !user.value) { loading.value = false; return }
   loading.value = true
   try {
     const res = await api.agentsMd.get(planId)
     if (token !== request) return
-    content.value = res.content
-    baseline.value = res.content
-    version.value = res.version
+    const restored = activeDraft.value.restore()
+    content.value = restored?.content ?? res.content
+    baseline.value = restored?.baseline ?? res.content
+    version.value = restored?.version ?? res.version
+    if (restored && restored.version !== res.version) status.value = '偏好已有更新，草稿仍保留，请比较最新内容后重新应用。'
     loadedTarget = planId
     loadedUser = user.value?.id
   } catch (error) {
@@ -88,7 +106,23 @@ onBeforeUnmount(() => { request++ })
 
 async function reload() {
   if (content.value !== baseline.value && !window.confirm('重载会丢弃未保存的偏好，确定继续吗？')) return
+  activeDraft.value.clear()
   await load()
+}
+
+async function compareLatest() {
+  const planId = targetPlanId.value
+  if (planId === undefined || saving.value || loading.value) return
+  try { latest.value = await api.agentsMd.get(planId) }
+  catch (error) { isError.value = true; status.value = apiErrorMessage(error) }
+}
+function reapplyDraft() {
+  if (!latest.value) return
+  baseline.value = latest.value.content
+  version.value = latest.value.version
+  latest.value = null
+  activeDraft.value.save({ content: content.value, baseline: baseline.value, version: version.value })
+  status.value = '草稿已采用最新基线，请检查后保存。'
 }
 
 async function save() {
@@ -105,10 +139,12 @@ async function save() {
   isError.value = false
   status.value = ''
   try {
-    const res = await api.agentsMd.save({ planId, content: submitted })
+    const res = await api.agentsMd.save({ planId, content: submitted, expectedVersion: version.value })
     if (token !== request) return
     baseline.value = submitted
     version.value = res.version
+    if (content.value === submitted) activeDraft.value.clear()
+    else activeDraft.value.save({ content: content.value, baseline: submitted, version: res.version })
     status.value = `已保存（v${res.version}）${content.value !== submitted ? '，另有未保存修改' : ''}`
   } catch (error) {
     if (token !== request) return
@@ -153,12 +189,13 @@ async function save() {
     <p v-if="loading" class="agents-panel__hint" role="status">正在加载偏好…</p>
     <p v-else-if="targetPlanId === undefined" class="agents-panel__hint">请先选择工作区，再编辑本规划偏好。</p>
     <ClientOnly v-else>
-      <MdEditor v-model="content" />
+      <LazyMdEditor v-model="content" />
       <template #fallback>
         <textarea v-model="content" aria-label="出行偏好" maxlength="4000" class="agents-panel__fallback" rows="12" />
       </template>
     </ClientOnly>
     <p class="agents-panel__hint" :class="{ 'agents-panel__status--error': tooLong }">{{ content.length }} / 4000 字{{ tooLong ? '，请删减后保存' : '' }}</p>
+    <DraftRecovery v-if="content !== baseline && !loading" :persisted="activeDraft.persisted.value" :storage-error="activeDraft.storageError.value" :busy="saving || loading" :differences="differences" @compare="compareLatest" @reapply="reapplyDraft" />
     <div class="agents-panel__actions">
       <button class="btn btn--ghost btn--small" :disabled="saving || loading || targetPlanId === undefined || !user" @click="reload">重载</button>
       <button class="btn btn--seal btn--small" :disabled="saving || loading || tooLong || targetPlanId === undefined || !user" @click="save">{{ saving ? '保存中…' : '保存' }}</button>

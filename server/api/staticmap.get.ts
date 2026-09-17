@@ -3,9 +3,9 @@ import { getStaticMapImage } from '../services/baidu'
 import { requireUser } from '../utils/session'
 
 export default defineEventHandler(async (event) => {
-  await requireUser(event)
+  const user = await requireUser(event)
   const query = await getValidatedQuery(event, StaticMapQuerySchema.parse)
-  const { buffer, contentType, cached } = await getStaticMapImage(query)
+  const { buffer, contentType, cached } = await getStaticMapImage(query, user.id)
   setResponseHeaders(event, {
     'content-type': contentType,
     'cache-control': 'private, max-age=86400',

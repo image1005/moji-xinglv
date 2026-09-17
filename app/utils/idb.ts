@@ -1,15 +1,10 @@
-/** 客户端用户隔离缓存；IndexedDB 不可用时退化为普通请求。 */
+/** User-scoped cache. Metadata lives separately so eviction never reads image blobs. */
 const DB_NAME = 'guofeng-travel'
 const STORE = 'kv'
+const META = 'metadata'
+export const CACHE_MAX_BYTES = 48 * 1024 * 1024
 const MAX_ENTRIES = 300
-
-interface IdbEntry<T = unknown> {
-  key: string
-  payload: T
-  expiresAt: number
-  lastAccess: number
-}
-
+interface CacheMeta { key: string; expiresAt: number; lastAccess: number; bytes: number }
 let dbPromise: Promise<IDBDatabase> | null = null
 let cacheUser: string | null = null
 let cacheGeneration = 0
@@ -19,70 +14,81 @@ function openDb(): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') return Promise.reject(new Error('浏览器缓存不可用'))
   if (dbPromise) return dbPromise
   dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 1)
+    const request = indexedDB.open(DB_NAME, 2)
     let failed = false
     request.onupgradeneeded = () => {
       const db = request.result
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'key' })
+      // Old cache is disposable; rebuilding avoids decoding every legacy blob on upgrade.
+      if (db.objectStoreNames.contains(STORE)) db.deleteObjectStore(STORE)
+      db.createObjectStore(STORE, { keyPath: 'key' })
+      if (db.objectStoreNames.contains(META)) db.deleteObjectStore(META)
+      const metadata = db.createObjectStore(META, { keyPath: 'key' })
+      metadata.createIndex('lastAccess', 'lastAccess')
     }
     request.onsuccess = () => {
       const db = request.result
-      if (failed) {
-        db.close()
-        return
-      }
-      db.onversionchange = () => {
-        db.close()
-        dbPromise = null
-      }
+      if (failed) { db.close(); return }
+      db.onversionchange = () => { db.close(); dbPromise = null }
       resolve(db)
     }
-    request.onerror = () => {
-      failed = true
-      reject(request.error)
-    }
-    request.onblocked = () => {
-      failed = true
-      reject(new Error('浏览器缓存被其他页面占用'))
-    }
-  }).catch((error: unknown) => {
-    dbPromise = null
-    throw error
-  })
+    request.onerror = () => { failed = true; reject(request.error) }
+    request.onblocked = () => { failed = true; reject(new Error('浏览器缓存被其他页面占用')) }
+  }).catch((error: unknown) => { dbPromise = null; throw error })
   return dbPromise
 }
 
-async function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>, generation?: number): Promise<T> {
+async function transaction<T>(run: (data: IDBObjectStore, meta: IDBObjectStore, done: (value: T) => void) => void, generation?: number): Promise<T> {
   const db = await openDb()
   if (generation !== undefined && generation !== cacheGeneration) throw new Error('缓存身份已变化')
   return new Promise<T>((resolve, reject) => {
-    const transaction = db.transaction(STORE, mode)
-    const request = run(transaction.objectStore(STORE))
-    transaction.oncomplete = () => resolve(request.result)
-    transaction.onerror = () => reject(transaction.error ?? request.error)
-    transaction.onabort = () => reject(transaction.error ?? new Error('浏览器缓存事务已中止'))
+    const tx = db.transaction([STORE, META], 'readwrite')
+    let value: T
+    tx.oncomplete = () => resolve(value)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('浏览器缓存事务已中止'))
+    run(tx.objectStore(STORE), tx.objectStore(META), (result) => { value = result })
   })
 }
 
-/** 身份变化立即使旧请求失效，并清理旧用户及历史无作用域缓存。 */
+export function selectCacheEvictions(entries: CacheMeta[], now = Date.now(), maxBytes = CACHE_MAX_BYTES, maxEntries = MAX_ENTRIES): string[] {
+  const ordered = [...entries].sort((a, b) => a.lastAccess - b.lastAccess)
+  let bytes = ordered.reduce((total, entry) => total + entry.bytes, 0)
+  let count = ordered.length
+  const removed = new Set<string>()
+  for (const entry of ordered) {
+    if (entry.expiresAt <= now) { removed.add(entry.key); bytes -= entry.bytes; count-- }
+  }
+  for (const entry of ordered) {
+    if (bytes <= maxBytes && count <= maxEntries) break
+    if (removed.has(entry.key)) continue
+    removed.add(entry.key)
+    bytes -= entry.bytes
+    count--
+  }
+  return [...removed]
+}
+
 export function setCacheUser(userId: string | null): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve()
   if (userId === cacheUser && cacheGeneration > 0) return cacheReady
   cacheUser = userId
   cacheGeneration++
+  for (const job of blobRequests.values()) job.controller.abort()
+  blobRequests.clear()
   cacheReady = cacheReady.catch(() => {}).then(async () => {
     try {
-      if (!userId) {
-        await tx('readwrite', (store) => store.clear())
-      } else {
+      await transaction<null>((data, meta, done) => {
+        if (!userId) { data.clear(); meta.clear(); done(null); return }
         const prefix = `${encodeURIComponent(userId)}:`
-        const keys = await tx<IDBValidKey[]>('readonly', (store) => store.getAllKeys())
-        await Promise.all(keys.filter((key) => typeof key !== 'string' || !key.startsWith(prefix))
-          .map((key) => tx('readwrite', (store) => store.delete(key))))
-      }
-    } catch {
-      // 不允许存储时仍可退出并直接请求资源。
-    }
+        const request = meta.openKeyCursor()
+        request.onsuccess = () => {
+          const cursor = request.result
+          if (!cursor) { done(null); return }
+          if (typeof cursor.key !== 'string' || !cursor.key.startsWith(prefix)) { data.delete(cursor.key); meta.delete(cursor.key) }
+          cursor.continue()
+        }
+      })
+    } catch { /* Private browsing still permits direct requests. */ }
   })
   return cacheReady
 }
@@ -94,59 +100,101 @@ export async function idbGet<T>(key: string): Promise<T | null> {
   await cacheReady
   if (generation !== cacheGeneration) return null
   const scopedKey = `${encodeURIComponent(user)}:${key}`
-  const entry = await tx<IdbEntry<T> | undefined>('readonly', (store) => store.get(scopedKey))
-  if (!entry || generation !== cacheGeneration) return null
-  if (entry.expiresAt <= Date.now()) {
-    await tx('readwrite', (store) => store.delete(scopedKey), generation)
-    return null
-  }
-  entry.lastAccess = Date.now()
-  await tx('readwrite', (store) => store.put(entry), generation)
-  return generation === cacheGeneration ? entry.payload : null
+  const result = await transaction<T | null>((data, meta, done) => {
+    const request = meta.get(scopedKey)
+    request.onsuccess = () => {
+      const entry = request.result as CacheMeta | undefined
+      if (!entry || entry.expiresAt <= Date.now()) { data.delete(scopedKey); meta.delete(scopedKey); done(null); return }
+      meta.put({ ...entry, lastAccess: Date.now() })
+      const payload = data.get(scopedKey)
+      payload.onsuccess = () => done((payload.result as { payload: T } | undefined)?.payload ?? null)
+    }
+  }, generation)
+  return generation === cacheGeneration ? result : null
 }
 
 export async function idbSet<T>(key: string, payload: T, ttlSeconds: number): Promise<void> {
   const generation = cacheGeneration
   const user = cacheUser
   if (!user) return
+  const bytes = payload instanceof Blob ? payload.size : new TextEncoder().encode(JSON.stringify(payload)).byteLength
+  if (bytes > CACHE_MAX_BYTES) return
   await cacheReady
   if (generation !== cacheGeneration) return
-  const entry: IdbEntry<T> = {
-    key: `${encodeURIComponent(user)}:${key}`,
-    payload,
-    expiresAt: Date.now() + ttlSeconds * 1000,
-    lastAccess: Date.now(),
+  const scopedKey = `${encodeURIComponent(user)}:${key}`
+  await transaction<null>((data, meta, done) => {
+    data.put({ key: scopedKey, payload })
+    meta.put({ key: scopedKey, bytes, expiresAt: Date.now() + ttlSeconds * 1000, lastAccess: Date.now() } satisfies CacheMeta)
+    const entries: CacheMeta[] = []
+    const request = meta.index('lastAccess').openCursor()
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (cursor) { entries.push(cursor.value as CacheMeta); cursor.continue(); return }
+      for (const expired of selectCacheEvictions(entries)) { data.delete(expired); meta.delete(expired) }
+      done(null)
+    }
+  }, generation)
+}
+
+interface BlobRequest { controller: AbortController; promise: Promise<Blob>; subscribers: number; settled: boolean }
+const blobRequests = new Map<string, BlobRequest>()
+
+async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, generation: number): Promise<Blob> {
+  try {
+    signal.throwIfAborted()
+    const cached = await idbGet<Blob>(`blob:${url}`).catch(() => null)
+    if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
+    signal.throwIfAborted()
+    if (cached instanceof Blob) return cached
+    const response = await fetch(url, { credentials: 'same-origin', signal })
+    if (!response.ok) throw new Error(`加载失败：${response.status}`)
+    const blob = await response.blob()
+    if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
+    signal.throwIfAborted()
+    await idbSet(`blob:${url}`, blob, ttlSeconds).catch(() => {})
+    if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
+    signal.throwIfAborted()
+    return blob
+  } catch (error) {
+    if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片', { cause: error })
+    throw error
   }
-  await tx('readwrite', (store) => store.put(entry), generation)
-  if (generation === cacheGeneration) await prune(generation)
 }
 
-async function prune(generation: number): Promise<void> {
-  const entries = await tx<IdbEntry[]>('readonly', (store) => store.getAll())
-  if (generation !== cacheGeneration) return
-  const ordered = entries.sort((a, b) => a.lastAccess - b.lastAccess)
-  const excess = Math.max(0, ordered.length - MAX_ENTRIES)
-  await Promise.all(ordered.filter((entry, index) => index < excess || entry.expiresAt <= Date.now())
-    .map((entry) => tx('readwrite', (store) => store.delete(entry.key), generation)))
-}
-
-export async function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?: AbortSignal): Promise<Blob> {
-  const generation = cacheGeneration
-  const key = `blob:${url}`
-  signal?.throwIfAborted()
-  const cached = await idbGet<Blob>(key).catch(() => null)
-  signal?.throwIfAborted()
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
-  if (cached instanceof Blob) return cached
-  const response = await fetch(url, { credentials: 'same-origin', signal })
-  if (!response.ok) throw new Error(`加载失败：${response.status}`)
-  const blob = await response.blob()
-  signal?.throwIfAborted()
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
-  await idbSet(key, blob, ttlSeconds).catch(() => {})
-  signal?.throwIfAborted()
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
-  return blob
+/** Cancelling one subscriber never cancels another; the last cancellation stops the fetch. */
+export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?: AbortSignal): Promise<Blob> {
+  if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('已取消', 'AbortError'))
+  const key = `${cacheGeneration}:${url}`
+  let job = blobRequests.get(key)
+  if (!job) {
+    const controller = new AbortController()
+    job = { controller, promise: Promise.resolve(new Blob()), subscribers: 0, settled: false }
+    const owned = job
+    job.promise = loadBlob(url, ttlSeconds, controller.signal, cacheGeneration).finally(() => {
+      owned.settled = true
+      if (blobRequests.get(key) === owned) blobRequests.delete(key)
+    })
+    blobRequests.set(key, job)
+  }
+  const shared = job
+  shared.subscribers++
+  return new Promise<Blob>((resolve, reject) => {
+    let finished = false
+    function release() {
+      if (finished) return false
+      finished = true
+      signal?.removeEventListener('abort', abort)
+      shared.subscribers--
+      if (!shared.subscribers && !shared.settled) {
+        shared.controller.abort()
+        if (blobRequests.get(key) === shared) blobRequests.delete(key)
+      }
+      return true
+    }
+    function abort() { if (release()) reject(signal?.reason ?? new DOMException('已取消', 'AbortError')) }
+    signal?.addEventListener('abort', abort, { once: true })
+    shared.promise.then((blob) => { if (release()) resolve(blob) }, (error: unknown) => { if (release()) reject(error) })
+  })
 }
 
 export async function fetchJsonCached<T>(url: string, ttlSeconds = 3600): Promise<T> {

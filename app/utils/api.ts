@@ -14,6 +14,7 @@ export interface PlanListItem {
   summary: string
   coverUrl: string
   version: number
+  revision: number
   createdAt: string
   updatedAt: string
 }
@@ -26,6 +27,7 @@ export interface PlanDetail {
   coverUrl: string
   plan: Plan
   version: number
+  revision: number
   createdAt: string
   updatedAt: string
 }
@@ -51,17 +53,36 @@ export interface VersionItem {
 export interface SaveResult {
   planId: number
   version: number
+  revision: number
   versionId: number | null
   skipped: boolean
   preview: PlanPreview
 }
 
+export interface Page<T> { items: T[]; nextCursor: string | null; hasMore: boolean }
+export interface MessagePage { nextCursor: string | null; hasMore: boolean }
+export interface ChatRun {
+  requestId: string; status: string; assistantMessageId: number | null; planId: number; conversationId: number
+  startedAt: string; updatedAt: string; finishedAt: string | null; errorCode: string | null; steps: number
+}
+
 export function apiErrorMessage(error: unknown, fallback = '操作失败，请稍后重试'): string {
-  const value = error as { statusCode?: number; status?: number; data?: { message?: string; statusMessage?: string }; message?: string } | null
+  type ErrorValue = { statusCode?: number; status?: number; statusMessage?: string; data?: { message?: string; statusMessage?: string }; message?: string }
+  let value = error as ErrorValue | null
+  // AI SDK 的非 2xx 流响应封装为 Error(JSON 文本)，没有 FetchError 的 status/data。
+  if (typeof value?.message === 'string' && value.message.length <= 16000 && value.message.trim().startsWith('{')) {
+    try {
+      const body: unknown = JSON.parse(value.message)
+      if (body && typeof body === 'object' && 'statusCode' in body && typeof body.statusCode === 'number') value = body as ErrorValue
+    } catch { /* 普通文本错误按原内容显示。 */ }
+  }
+  const detail = value?.data?.statusMessage || value?.data?.message || value?.statusMessage
   if (value?.statusCode === 409 || value?.status === 409) {
+    if (detail?.includes('请求') || detail?.includes('偏好')) return detail
     return '版本冲突：规划已被更新，请先重载最新版本再保存。未保存的草稿仍保留。'
   }
-  return value?.data?.message || value?.data?.statusMessage || value?.message || fallback
+  if (value?.statusCode === 429 || value?.status === 429) return detail || '当前生成任务较多或本周期额度已用完，请稍后再试。内容已保留。'
+  return detail || value?.message || fallback
 }
 
 export const api = {
@@ -69,6 +90,7 @@ export const api = {
 
   plans: {
     list: () => $fetch<PlanListItem[]>('/api/plans'),
+    listPage: (cursor?: string, q?: string, sort?: 'created' | 'updated') => $fetch<Page<PlanListItem>>('/api/plans', { query: { paged: true, limit: 50, cursor, q, sort } }),
     create: (body: { title?: string; planJson?: unknown }) =>
       $fetch<{ planId: number; version: number }>('/api/plans', { method: 'POST', body }),
     detail: (id: number) => $fetch<PlanDetail>(`/api/plans/${id}`),
@@ -81,16 +103,18 @@ export const api = {
       budget?: Plan['budget']
       contentMd?: string
       expectedVersion?: number
-    }) => $fetch<{ ok: boolean }>(`/api/plans/${id}`, { method: 'PATCH', body }),
+      expectedRevision?: number
+    }) => $fetch<{ ok: boolean; revision: number }>(`/api/plans/${id}`, { method: 'PATCH', body }),
     remove: (id: number) => $fetch<{ ok: boolean }>(`/api/plans/${id}`, { method: 'DELETE' }),
-    save: (id: number, body: { planJson?: unknown; conversationId?: number; expectedVersion?: number }) =>
+    save: (id: number, body: { planJson?: unknown; conversationId?: number; expectedVersion?: number; expectedRevision?: number }) =>
       $fetch<SaveResult>(`/api/plans/${id}/save`, { method: 'POST', body }),
-    switchVersion: (id: number, body: { version: number; conversationId?: number; expectedVersion?: number }) =>
-      $fetch<{ version: number; versionId: number; switched: true; preview: PlanPreview }>(`/api/plans/${id}/switch`, {
+    switchVersion: (id: number, body: { version: number; conversationId?: number; expectedVersion?: number; expectedRevision?: number }) =>
+      $fetch<{ version: number; revision: number; versionId: number; switched: true; preview: PlanPreview }>(`/api/plans/${id}/switch`, {
         method: 'POST',
         body,
       }),
     versions: (id: number) => $fetch<VersionItem[]>(`/api/plans/${id}/versions`),
+    versionsPage: (id: number, cursor?: string) => $fetch<Page<VersionItem>>(`/api/plans/${id}/versions`, { query: { paged: true, limit: 50, cursor } }),
     versionPlan: (id: number, version: number) =>
       $fetch<{ plan: Plan }>(`/api/plans/${id}/versions/${version}`),
   },
@@ -98,19 +122,23 @@ export const api = {
   conversations: {
     list: (planId?: number) =>
       $fetch<ConversationItem[]>('/api/conversations', { query: planId ? { planId } : {} }),
+    listPage: (planId?: number, cursor?: string, q?: string) => $fetch<Page<ConversationItem>>('/api/conversations', { query: { paged: true, limit: 50, planId, cursor, q } }),
     create: (planId: number, title?: string) =>
       $fetch<ConversationItem>('/api/conversations', { method: 'POST', body: { planId, title } }),
     detail: (id: number) =>
       $fetch<{ conversation: ConversationItem; messages: MessageRecord[] }>(`/api/conversations/${id}`),
+    messagesPage: (id: number, cursor?: string) => $fetch<{ conversation: ConversationItem; messages: MessageRecord[]; messagePage: MessagePage }>(`/api/conversations/${id}`, { query: { paged: true, limit: 50, cursor } }),
     remove: (id: number) => $fetch<{ ok: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   },
+
+  chatRuns: (conversationId: number) => $fetch<ChatRun[]>('/api/chat/runs', { query: { conversationId } }),
 
   agentsMd: {
     get: (planId?: number | null) =>
       $fetch<{ planId: number | null; content: string; version: number }>('/api/agents-md', {
         query: planId ? { planId } : {},
       }),
-    save: (body: { planId: number | null; content: string }) =>
+    save: (body: { planId: number | null; content: string; expectedVersion?: number }) =>
       $fetch<{ ok: boolean; version: number }>('/api/agents-md', { method: 'PUT', body }),
   },
 
@@ -130,7 +158,9 @@ export const api = {
         conversations: number
         messages: number
         cache: { total: number; expired: number; bytes: number }
-        baidu: { panoramaImages: number; staticMaps: number; poiQueries: number }
+        metrics: { service: string; requests: number; errors: number; cacheHits: number; durationMs: number; inputTokens: number; outputTokens: number; usageSamples: number; steps: number }[]
+        runs: { status: string; count: number }[]
+        recentRuns: ChatRun[]
       }>('/api/admin/stats'),
     users: () =>
       $fetch<

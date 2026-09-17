@@ -2,7 +2,14 @@
 import { layoutVersionTree } from '#shared/utils/version-tree'
 import { formatDateTime, sourceLabel } from '~/utils/format'
 
-const { versions, currentPlan, errorMessage, switchVersion } = useWorkspace()
+const { versions, currentPlan, errorMessage, switchVersion, loadVersions, loadingVersions, versionsHasMore } = useWorkspace()
+const missingParents = computed(() => {
+  const known = new Set(versions.value.map((item) => item.id))
+  return new Set(versions.value.filter((item) => item.parentVersionId !== null && !known.has(item.parentVersionId)).map((item) => item.id))
+})
+onMounted(() => loadVersions())
+onActivated(() => loadVersions())
+watch(() => currentPlan.value?.revision, () => loadVersions())
 
 const PAD = 28
 const zoom = ref(1)
@@ -77,8 +84,10 @@ function onWheel(event: WheelEvent) {
 
 function onPointerDown(event: PointerEvent) {
   if (event.button !== 0) return
-  dragging.value = true
   moved = false
+  // Nodes keep their pointer target for click; only the canvas begins a pan gesture.
+  if (event.target instanceof Element && event.target.closest('.roadmap__node')) return
+  dragging.value = true
   origin = { x: event.clientX, y: event.clientY, panX: pan.value.x, panY: pan.value.y }
   ;(event.currentTarget as Element).setPointerCapture?.(event.pointerId)
 }
@@ -95,12 +104,15 @@ function onPointerMove(event: PointerEvent) {
   pan.value = { x: origin.panX - dx * scaleX, y: origin.panY - dy * scaleY }
 }
 
-function onPointerUp() {
+function onPointerUp(event: PointerEvent) {
   dragging.value = false
+  const element = event.currentTarget as Element
+  if (element.hasPointerCapture?.(event.pointerId)) element.releasePointerCapture(event.pointerId)
 }
 
-function select(id: number) {
-  if (moved) return
+function select(id: number, keyboard = false) {
+  if (moved && !keyboard) return
+  moved = false
   selectedId.value = selectedId.value === id ? null : id
   feedback.value = ''
 }
@@ -132,6 +144,9 @@ async function doSwitch() {
 
 <template>
   <div class="roadmap">
+    <p v-if="missingParents.size" class="feedback" role="status">虚线节点的更早历史尚未加载，它们不是行程起点。可继续加载历史。</p>
+    <button v-if="versionsHasMore" class="btn btn--small" :disabled="loadingVersions" @click="loadVersions(true)">{{ loadingVersions ? '加载中…' : '加载更早的版本' }}</button>
+    <p v-if="currentPlan && !versions.some(v => v.version === currentPlan?.version)" class="feedback">当前为 v{{ currentPlan.version }}，请加载更早的版本以在图中定位。</p>
     <div v-if="!versions.length" class="roadmap__empty">
       暂无版本记录。保存一次行程或让 AI 编辑后，这里会长出你的版本路线。
     </div>
@@ -158,6 +173,8 @@ async function doSwitch() {
           @pointerdown="onPointerDown"
           @pointermove="onPointerMove"
           @pointerup="onPointerUp"
+          @pointercancel="onPointerUp"
+          @lostpointercapture="onPointerUp"
           @pointerleave="onPointerUp"
         >
           <g :transform="`translate(${PAD} ${PAD})`">
@@ -166,13 +183,14 @@ async function doSwitch() {
               v-for="node in layout.nodes"
               :key="node.id"
               class="roadmap__node"
-              :class="[`roadmap__node--${node.source}`, { 'roadmap__node--current': node.id === currentId, 'roadmap__node--selected': node.id === selectedId }]"
+              :class="[`roadmap__node--${node.source}`, { 'roadmap__node--current': node.id === currentId, 'roadmap__node--selected': node.id === selectedId, 'roadmap__node--incomplete': missingParents.has(node.id) }]"
               :transform="`translate(${node.x} ${node.y})`"
               role="button"
               tabindex="0"
-              :aria-label="`版本 v${node.version}`"
+              :aria-label="`版本 v${node.version}${missingParents.has(node.id) ? '，更早历史尚未加载' : ''}`"
               @click="select(node.id)"
-              @keydown.enter.prevent="select(node.id)"
+              @keydown.enter.prevent="select(node.id, true)"
+              @keydown.space.prevent="select(node.id, true)"
             >
               <rect :width="node.width" :height="node.height" rx="7" />
               <text x="32" y="22" text-anchor="middle">v{{ node.version }}</text>
@@ -204,6 +222,7 @@ async function doSwitch() {
 </template>
 
 <style scoped>
+.roadmap__node--incomplete rect { stroke-dasharray: 5 4; }
 .roadmap { display: grid; gap: 14px; }
 .roadmap__empty { margin: 16vh auto 0; max-width: 340px; text-align: center; color: var(--ink-faint); font-size: 13px; line-height: 1.9; }
 .roadmap__head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }

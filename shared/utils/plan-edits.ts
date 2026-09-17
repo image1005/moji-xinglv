@@ -135,7 +135,7 @@ export function applyPlanEditOps(plan: Plan, ops: readonly PlanEditOp[]): Plan {
       default: {
         if (op.action === 'add') {
           const text = (op.text ?? '').trim()
-          if (!text) throw new PlanEditError(`${label}：新增清单条目需要 text`)
+          if (!text) throw new PlanEditError(`${label}：新增清单条目需要操作顶层 text（与 target/action 同级，不要放进 value）`)
           next.checklist.push(parseValue(ChecklistItemSchema, { id: crypto.randomUUID(), text, done: op.value?.done === true }, label, '清单'))
           return
         }

@@ -1,9 +1,10 @@
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, lt, or, sql } from 'drizzle-orm'
 import { createError } from 'h3'
-import type { MessageRole, MessageRecord, PlanPreview } from '../../shared/types'
+import type { MessageRole, MessageRecord, PageOptions, PlanPreview } from '../../shared/types'
 import { conversations, messages } from '../database/schema'
 import { db } from '../utils/db'
 import { getPlanRow } from './plan'
+import { finishPage, readPage } from './pagination'
 
 /** 会话与消息持久化（硬约束 7） */
 
@@ -22,7 +23,21 @@ export async function listConversations(userId: string, planId?: number) {
     })
     .from(conversations)
     .where(where)
-    .orderBy(desc(conversations.updatedAt))
+    .orderBy(desc(conversations.updatedAt), desc(conversations.id))
+}
+
+export async function listConversationsPage(userId: string, planId?: number, options: PageOptions & { q?: string } = {}) {
+  if (planId !== undefined) await getPlanRow(userId, planId)
+  const keyword = options.q?.trim().toLocaleLowerCase() ?? ''
+  const page = readPage(options, `conversations:${userId}:${planId ?? 'all'}:${keyword}`)
+  const cursor = page.cursor
+  const rows = await db.select({ id: conversations.id, planId: conversations.planId, title: conversations.title,
+    createdAt: conversations.createdAt, updatedAt: conversations.updatedAt,
+  }).from(conversations).where(and(eq(conversations.userId, userId), planId === undefined ? undefined : eq(conversations.planId, planId),
+    keyword ? sql`instr(lower(${conversations.title}), ${keyword}) > 0` : undefined,
+    cursor ? or(lt(conversations.updatedAt, new Date(cursor.sort)), and(eq(conversations.updatedAt, new Date(cursor.sort)), lt(conversations.id, cursor.id))) : undefined,
+  )).orderBy(desc(conversations.updatedAt), desc(conversations.id)).limit(page.limit + 1)
+  return finishPage(rows, page, (row) => ({ sort: row.updatedAt.getTime(), id: row.id }))
 }
 
 export async function getConversation(userId: string, id: number) {
@@ -61,7 +76,11 @@ export async function listMessages(conversationId: number, limit = 200): Promise
     .where(eq(messages.conversationId, conversationId))
     .orderBy(desc(messages.createdAt), desc(messages.id))
     .limit(limit)
-  return rows.reverse().map((r) => ({
+  return rows.reverse().map(toMessageRecord)
+}
+
+function toMessageRecord(r: typeof messages.$inferSelect): MessageRecord {
+  return {
     id: r.id,
     conversationId: r.conversationId,
     role: r.role as MessageRole,
@@ -70,7 +89,18 @@ export async function listMessages(conversationId: number, limit = 200): Promise
     preview: (r.previewJson ?? null) as PlanPreview | null,
     planVersion: r.planVersionId ?? null,
     createdAt: r.createdAt.toISOString(),
-  }))
+  }
+}
+
+export async function listMessagesPage(userId: string, conversationId: number, options: PageOptions = {}) {
+  await getConversation(userId, conversationId)
+  const page = readPage(options, `messages:${userId}:${conversationId}`)
+  const cursor = page.cursor
+  const rows = await db.select().from(messages).where(and(eq(messages.conversationId, conversationId),
+    cursor ? or(lt(messages.createdAt, new Date(cursor.sort)), and(eq(messages.createdAt, new Date(cursor.sort)), lt(messages.id, cursor.id))) : undefined,
+  )).orderBy(desc(messages.createdAt), desc(messages.id)).limit(page.limit + 1)
+  const result = finishPage(rows, page, (row) => ({ sort: row.createdAt.getTime(), id: row.id }))
+  return { ...result, items: result.items.reverse().map(toMessageRecord) }
 }
 
 export async function appendMessage(

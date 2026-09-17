@@ -20,9 +20,14 @@
    - 会话必须归属工作区（`conversations.plan_id` NOT NULL），不实现「未分组」区。
 7. **SSR 兼容**：`nuxt.config.ts` 保留 `vite.ssr.noExternal: ['zod']`——`shared/` 目录经 Vite 优化后，SSR 下会丢失 zod 命名导出（报 `z.object` undefined）。
 8. **山海行笺数据扩展**：`foodJournal` 美食手账与 `checklist` 出行清单均默认空数组；景点增加地址、类别、停留时长与花费。未知经纬度同时为 `null`，不得由 AI 编造，允许人工补全；历史 JSON 用 schema 默认值兼容，不破坏已有数据。
-9. **乐观锁与事务**：保存、切换版本与 AI 编辑校验 `expectedVersion`；过期版本返回 409，不静默覆盖。规划快照与递增版本保持事务一致，参数/作用域错误在写入前拒绝。当前 API 的 `expectedVersion` 为可选非负整数，指「当前版本号」（切换后可能为较早版本），应用客户端必须发送；关联系统消息在版本事务成功后追加，尚不保证消息失败撤销版本，验收须区分此边界。AI 仅提交结构化 patch，不开放全量覆盖工具。**切换版本只移动 `plans.current_version_id` 指针，直接使用目标版本，不新建版本**。
+9. **乐观锁与事务**：规划有独立、单调递增的 `revision`；保存、切换版本与手工编辑携带 `expectedVersion` / `expectedRevision`，过期快照返回 409。`version` 可以切回历史值，同轮 AI 可原地更新当前版本，因此修订号不可用版本号代替。API 为旧调用保留可选字段，当前客户端必须发送；AI 执行侧维护读取时修订号并在冲突后重读。规划快照、版本、修订号和关联预览/系统消息在同一事务内提交，参数/作用域错误在写入前拒绝。AI 仅提交结构化编辑，不开放全量覆盖工具。**切换版本直接使用目标版本，不新建版本；revision 仍递增**。
 10. **本地地点与路线边界**：POI / `search_poi` 仅检索当前用户当前规划的已有景点，不调用在线地点搜索或地理编码。静态图只绘制每日景点顺序连线，不是导航，不给出道路路线、距离或预计用时。无 AK / 无坐标时显示说明，不影响手工编辑；百度 secret 仍仅在服务端 service 读取。
 11. **验收真实性**：CI 使用冻结锁文件的 Bun 安装、`bun run check` 与构建，测试凭据为 dummy，不依赖真实 AI / 百度。smoke 仅写本次临时规划与会话，finally 清理，不注册持久用户或改偏好；默认只接受 localhost/127.0.0.1，远端必须显式授权。验收结论以本次实际命令结果报告为准，不沿用历史「全绿」声明。
+12. **编辑与移动端连续性**：地点、食记、规划资料及旅行偏好草稿按用户、工作区、对象存于本机；刷新及 A→B→A 后可恢复。409 保留草稿，用户先比较最新内容，再明确重新应用并保存；偏好另以自身版本校验。抽屉关闭时 inert，打开时约束焦点，Escape 关闭并返回触发按钮；页签支持方向键，布局适配动态视口。草稿不是跨设备同步或数据库备份。
+13. **AI 生命周期与恢复**：同工作区查看预览或设置不停止生成；跨工作区/会话停止。生成请求使用唯一 ID，在 `chat_runs` 记录状态及检查点；重复 ID 不再次执行工具，明确新一轮重试才创建新 ID。重启恢复已提交行程、预览与中断状态，不承诺续传未保存 token；当前按单实例部署。
+14. **有界上下文和确定性检查**：可信历史来自数据库；首批用户需求与近期对话按字节预算整理，长规划只注入概要，通过工具分段读取。输入包含规则、工具契约、历史及工具结果，输出另设 token 上限。行程检查提示日期、时间重叠、重复地点、密度、缺坐标和预算明细问题，不提供实时营业/路况或真实模型准确率保证。
+15. **分页和缓存**：工作区、会话、消息、版本首批默认 50 条，采用有作用域的游标；工作区搜索和排序在服务端覆盖授权全库。图片按视口和面板活动状态加载、滑块防抖及请求合并。前端图片/规划缓存按用户隔离，48 MiB / 300 条并按元数据淘汰；网络故障的规划快照只读，401/403/404 不使用旧缓存。后端默认 512 MiB、分批回收，历史 `panoramas` 表兼容保留，新图片只写 `cache`。
+16. **运行治理与发布**：用户/全局并发、队列和周期请求额度可配置；AI/地图指标来自实际服务边界，供应商未返回的 token 保持未知。发布检查增加临时数据库 HTTP 与本地模拟 AI 浏览器验收；SQLite 备份必须是一致性新副本，恢复演练不得覆盖业务数据库。实现与本轮验证记录见 [OPTIMIZATION_IMPLEMENTATION.md](OPTIMIZATION_IMPLEMENTATION.md)。
 
 ## 1. 目标
 
@@ -76,7 +81,7 @@
 
 - 聊天下方「保存」按钮将当前 JSON 保存为规划
 - `plan_versions` 表保存历史版本，支持版本切换
-- AI 编辑或有内容变化的手工保存生成 `plan_version`（递增版本号 + diff + 来源）；无变化保存返回 `skipped: true`，但仍检查 `expectedVersion`。切换版本直接使用目标版本（只移动当前版本指针，不新建、不删除历史）。
+- AI 编辑或有内容变化的手工保存生成 `plan_version`（递增版本号 + diff + 来源，同轮 AI 遵循裁决 9）；无变化保存返回 `skipped: true`，但仍检查 `expectedVersion` 与 `expectedRevision`。切换版本直接使用目标版本（不新建、不删除历史），独立 revision 仍递增。
 
 ### 3.6 我的规划
 
@@ -157,7 +162,7 @@
 
 ### plans
 
-`id`、`user_id`、`title`、`summary`、`content_md`、`plan_json`、`cover_url`、`current_version_id`、`created_at`、`updated_at`
+`id`、`user_id`、`title`、`summary`、`content_md`、`plan_json`、`cover_url`、`current_version_id`、`revision`、`created_at`、`updated_at`
 
 ### plan_versions
 
@@ -166,6 +171,8 @@
 ### panoramas
 
 `id`、`location`、`width`、`height`、`image_blob`、`hash`、`created_at`
+
+仅保留历史兼容，新图片统一进入 `cache`。
 
 ### cache
 
@@ -182,6 +189,14 @@
 ### agents_md
 
 `id`、`user_id`、`plan_id`（nullable）、`content`、`version`、`created_at`、`updated_at`
+
+### chat_runs
+
+`id`、`user_id`、`request_id`、`request_hash`、`plan_id`、`conversation_id`、`assistant_message_id`、`status`、`steps`、`error_code`、`started_at`、`updated_at`、`finished_at`。用户与请求 ID 联合唯一，用于去重和恢复，不存储聊天正文。
+
+### usage_metrics
+
+按 `day`、`user_id`、`service` 聚合 `requests`、`errors`、`cache_hits`、`duration_ms`、`input_tokens`、`output_tokens`、`usage_samples`、`steps`；指标不复制用户规划或提示词。
 
 ## 5. 行程 JSON Schema
 
