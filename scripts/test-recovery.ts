@@ -117,6 +117,7 @@ try {
     return response
   }
   const post = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+  const chatPost = (body: unknown): RequestInit => ({ method: 'POST', headers: { 'content-type': 'application/x-ndjson' }, body: `${JSON.stringify(body)}\n` })
   async function json<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await request(path, init)
     assert(response.ok, `${path} 返回 HTTP ${response.status}: ${(await response.clone().text()).slice(0, 400)}`)
@@ -142,7 +143,7 @@ try {
   let beforeMessages: Message[] = []
   let beforeVersions: { id: number; version: number }[] = []
   const requestId = crypto.randomUUID()
-  const chatBody = () => ({ planId: state.planId, conversationId, requestId, messages: [{ role: 'user', parts: [{ type: 'text', text: '只修改行程简介，然后继续说明。' }] }] })
+  const chatBody = () => ({ protocolVersion: 1, type: 'message', messageId: 'recovery-user', planId: state.planId, conversationId, requestId, message: { id: 'recovery-user', role: 'user', parts: [{ type: 'text', text: '只修改行程简介，然后继续说明。' }] } })
 
   await step('启动独立数据库、注册测试账号与规划', async () => {
     const migration = Bun.spawn([process.execPath, 'run', 'server/database/migrate.ts'], { env, stdout: 'pipe', stderr: 'pipe' })
@@ -157,8 +158,9 @@ try {
   })
 
   await step('真实工具提交成功且第二步仍在生成', async () => {
-    const response = await request('/api/chat', { ...post(chatBody()), signal: AbortSignal.any([requestAbort.signal, AbortSignal.timeout(30000)]) })
+    const response = await request('/api/chat', { ...chatPost(chatBody()), signal: AbortSignal.any([requestAbort.signal, AbortSignal.timeout(30000)]) })
     assert.equal(response.status, 200)
+    assert.match(response.headers.get('content-type') ?? '', /application\/x-ndjson/)
     pendingStream = response.text().catch(() => '')
     let committed = false
     for (let i = 0; i < 120; i++) {
@@ -205,7 +207,7 @@ try {
     assert.equal(tasks[0]!.requestId, requestId)
     assert.equal(tasks[0]!.status, 'interrupted')
     assert.equal(tasks[0]!.errorCode, 'server_restart')
-    const repeated = await request('/api/chat', post(chatBody()))
+    const repeated = await request('/api/chat', chatPost(chatBody()))
     assert.equal(repeated.status, 409)
     await repeated.text()
     assert.equal(state.requests, 2, '重试不应触发模型或重复编辑')
@@ -215,9 +217,12 @@ try {
 
   await step('新请求正常完成，并发名额已释放', async () => {
     const freshId = crypto.randomUUID()
-    const response = await request('/api/chat', post({ ...chatBody(), requestId: freshId }))
+    const response = await request('/api/chat', chatPost({ ...chatBody(), requestId: freshId }))
     assert.equal(response.status, 200)
-    assert((await response.text()).includes('重启后新一轮已完成'))
+    const events = (await response.text()).trim().split('\n').map(line => JSON.parse(line))
+    assert(JSON.stringify(events).includes('重启后新一轮已完成'))
+    assert.equal(events.at(-1).type, 'terminal')
+    assert.equal(events.at(-1).status, 'completed')
     const tasks = await json<Run[]>(`/api/chat/runs?conversationId=${conversationId}`)
     assert.equal(tasks.find(task => task.requestId === freshId)?.status, 'completed')
     assert.equal(tasks.find(task => task.requestId === requestId)?.status, 'interrupted')

@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { computed, ref, shallowRef, watch } from 'vue'
 import type { MessageRecord, PlanPreview } from '../shared/types'
 import type { PlanDetail } from '../app/utils/api'
-import { toWorkbenchMessages, useWorkspace } from '../app/composables/useWorkspace'
+import { useWorkspace } from '../app/composables/useWorkspace'
+import { toWorkbenchMessages } from '../app/features/workspace/messages'
+import type { Attachment } from '../shared/schemas/attachment'
+import type { PlanResources } from '../shared/schemas/media'
 
 const mocks = vi.hoisted(() => ({
   plans: { list: vi.fn(), listPage: vi.fn(), detail: vi.fn(), versions: vi.fn(), versionsPage: vi.fn(), create: vi.fn(), save: vi.fn(), switchVersion: vi.fn(), remove: vi.fn(), updateMeta: vi.fn() },
@@ -26,6 +29,7 @@ vi.mock('@ai-sdk/vue', () => ({
   },
 }))
 vi.mock('ai', () => ({ DefaultChatTransport: class { api = '/api/chat' } }))
+vi.mock('../app/utils/chat-transport', () => ({ JsonlChatTransport: class { constructor(public options: { body: () => unknown }) {} } }))
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -306,6 +310,12 @@ describe('工作区状态隔离与并发保护', () => {
 })
 
 describe('持久化消息预览', () => {
+  it('图片历史恢复为SDK文件part而不写入普通文本', () => {
+    const records = [{ id: 8, role: 'user', content: '', parts: [{ type: 'file', url: '/api/attachments/123', mediaType: 'image/png', filename: '攻略.png' }] }] as MessageRecord[]
+    const message = toWorkbenchMessages(records)[0]!
+    expect(message.parts).toEqual([{ type: 'file', url: '/api/attachments/123', mediaType: 'image/png', filename: '攻略.png' }])
+    expect(message.parts.some(part => part.type === 'text')).toBe(false)
+  })
   it('工具已携带相同版本预览时不重复追加 data-preview', () => {
     const preview = { planId: 1, version: 3 } as PlanPreview
     const records = [{ id: 1, role: 'assistant', content: '', toolCalls: [{ name: 'save_plan', output: { preview } }], preview }] as MessageRecord[]
@@ -318,5 +328,81 @@ describe('持久化消息预览', () => {
     const preview = { planId: 1, version: 3 } as PlanPreview
     const records = [{ id: 1, role: 'system', content: '', toolCalls: [{ name: 'save_plan', output: { preview: { ...preview, version: 2 } } }], preview }] as MessageRecord[]
     expect(toWorkbenchMessages(records)[0]!.parts.filter((part) => part.type === 'data-preview')).toHaveLength(1)
+  })
+})
+
+describe('图片发送与本轮配置身份', () => {
+  const photo = (id: string): Attachment => ({ id, url: `/api/attachments/${id}`, mediaType: 'image/png', filename: '照片.png', size: 80, width: 8, height: 8 })
+  async function prepared() {
+    const workspace = useWorkspace()
+    await workspace.openWorkspace(1)
+    workspace.modelSettings.configuration.value = { model: 'vision', webSearch: false, thinking: 'off' }
+    workspace.modelSettings.capabilities.value = { model: 'vision', provider: 'test', vision: true, tools: true, thinkingLevels: ['off', 'standard'], search: { available: true, provider: 'Tavily', native: false }, verification: 'configured' }
+    return workspace
+  }
+  it('允许纯图片发送并将真实文件part交给SDK', async () => {
+    const workspace = await prepared()
+    await workspace.sendMessage('', [photo('one')])
+    expect(workspace.chat.value!.sendMessage).toHaveBeenCalledWith({ parts: [{ type: 'file', url: '/api/attachments/one', mediaType: 'image/png', filename: '照片.png' }] })
+  })
+  it('相同失败需求复用请求身份，但改变附件或实际配置会创建新身份', async () => {
+    const workspace = await prepared()
+    const instance = workspace.chat.value!
+    const transport = (instance as unknown as { options: { transport: { options: { body: () => { requestId: string; configuration: unknown } } } } }).options.transport
+    const identities: string[] = []
+    vi.mocked(instance.sendMessage).mockImplementation(async () => {
+      identities.push(transport.options.body().requestId)
+      throw new Error('断开连接')
+    })
+    await workspace.sendMessage('杭州', [photo('one')])
+    await workspace.sendMessage('杭州', [photo('one')])
+    await workspace.sendMessage('杭州', [photo('two')])
+    await workspace.sendMessage('杭州', [photo('two')], { model: 'vision', webSearch: true, thinking: 'standard' })
+    expect(identities[0]).toBe(identities[1])
+    expect(new Set(identities).size).toBe(3)
+    expect(transport.options.body().configuration).toEqual({ model: 'vision', webSearch: true, thinking: 'standard' })
+  })
+  it('不支持视觉的模型拒绝图片且不静默退化成文字', async () => {
+    const workspace = await prepared()
+    workspace.modelSettings.capabilities.value!.vision = false
+    expect(await workspace.sendMessage('', [photo('one')])).toBeNull()
+    expect(workspace.chat.value!.sendMessage).not.toHaveBeenCalled()
+    expect(workspace.errorMessage.value).toContain('不支持图片')
+  })
+})
+
+describe('渐进资源与隔离', () => {
+  const resourcePage = (count: number): PlanResources => ({ revision: 4, resources: Array.from({ length: count }, (_, index) => ({ entityId: `spot:${index}`, entityType: 'spot', name: `景点${index}`, city: '杭州', status: 'pending', image: null, location: null, error: null })) })
+  it('分批继续补充第13个资源，并发不超过2且不自动重试失败资源', async () => {
+    const workspace = useWorkspace()
+    const page = resourcePage(15)
+    workspace.planResources.records.value[1] = structuredClone(page)
+    let active = 0, maximum = 0
+    const requested: string[] = []
+    vi.stubGlobal('$fetch', vi.fn(async (_path: string, options: { body: { entityId: string } }) => {
+      active++; maximum = Math.max(maximum, active)
+      requested.push(options.body.entityId)
+      await Promise.resolve()
+      const item = page.resources.find(item => item.entityId === options.body.entityId)!
+      item.status = item.entityId === 'spot:0' ? 'failed' : 'ready'
+      active--
+      return structuredClone(page)
+    }))
+    await workspace.planResources.enrich(1, 4)
+    expect(requested).toHaveLength(15)
+    expect(new Set(requested).size).toBe(15)
+    expect(maximum).toBeLessThanOrEqual(2)
+    expect(workspace.planResources.records.value[1]!.resources[0]!.status).toBe('failed')
+    expect(workspace.planResources.records.value[1]!.resources[12]!.status).toBe('ready')
+  })
+  it('退出后迟到的资源结果不能填充另一用户状态', async () => {
+    const workspace = useWorkspace()
+    const response = deferred<PlanResources>()
+    vi.stubGlobal('$fetch', vi.fn(() => response.promise))
+    const pending = workspace.planResources.load(1, 4)
+    workspace.resetWorkspace()
+    response.resolve(resourcePage(1))
+    await pending
+    expect(workspace.planResources.records.value).toEqual({})
   })
 })

@@ -13,7 +13,7 @@ for (const ddl of [
   'CREATE TABLE plans (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT \'\', content_md TEXT NOT NULL DEFAULT \'\', plan_json TEXT NOT NULL, cover_url TEXT NOT NULL DEFAULT \'\', current_version_id INTEGER, revision INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
   'CREATE TABLE plan_versions (id INTEGER PRIMARY KEY, plan_id INTEGER NOT NULL, version INTEGER NOT NULL, plan_json TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, parent_version_id INTEGER, source TEXT NOT NULL, diff_json TEXT, message_id INTEGER, UNIQUE(plan_id, version))',
   'CREATE TABLE conversations (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, plan_id INTEGER NOT NULL, title TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
-  'CREATE TABLE messages (id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, preview_json TEXT, plan_version_id INTEGER, created_at INTEGER NOT NULL)',
+  'CREATE TABLE messages (id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, parts_json TEXT, preview_json TEXT, plan_version_id INTEGER, created_at INTEGER NOT NULL)',
   'CREATE TABLE agents_md (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, plan_id INTEGER, content TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(user_id, plan_id))',
   'CREATE TABLE cache (key TEXT PRIMARY KEY, value BLOB NOT NULL, type TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL)',
 ]) db.run(sql.raw(ddl))
@@ -30,6 +30,18 @@ function createAssistant(planId: number, messageId?: number, userId = owner) {
 }
 
 const cases: Record<string, () => Promise<void>> = {
+  async locationEvidence() {
+    const { planId } = await service.createPlan(owner, emptyPlan('坐标可信性'))
+    await assert.rejects(service.applyPlanEdits(owner, planId, [{ target: 'day', action: 'add', value: { city: '杭州', spots: [{ name: '模型猜测位置', lng: 120.1, lat: 30.2 }] } }]), { statusCode: 400 })
+    assert.equal((await service.getPlanSnapshot(owner, planId)).row.revision, 1)
+    const plan = { ...emptyPlan('坐标可信性'), days: [{ city: '杭州', spots: [{ name: '用户确认位置', lng: 120.1, lat: 30.2 }] }] }
+    await service.savePlanVersion(owner, planId, { source: 'user', planJson: plan, expectedRevision: 1 })
+    const snapshot = await service.getPlanSnapshot(owner, planId)
+    await service.applyPlanEdits(owner, planId, [{ target: 'spot', action: 'update', day: 0, index: 0, value: { notes: '保留已确认坐标' } }])
+    assert.equal((await service.getPlanSnapshot(owner, planId)).plan.days[0]!.spots[0]!.lng, 120.1)
+    await assert.rejects(service.applyPlanEdits(owner, planId, [{ target: 'spot', action: 'update', day: 0, index: 0, value: { name: '另一个景点' } }]), { statusCode: 400 })
+    assert.equal((await service.getPlanSnapshot(owner, planId)).row.revision, snapshot.row.revision + 1)
+  },
   async pageSearchSort() {
     const conversationService = await import('../server/services/conversation')
     const first = await service.createPlan(owner, { ...input, title: '杭州_100%' })
@@ -83,7 +95,7 @@ const cases: Record<string, () => Promise<void>> = {
   async commitRollback() {
     const result = await service.createPlan(owner, input)
     db.run(sql.raw("CREATE TRIGGER fail_plan_update BEFORE UPDATE ON plans BEGIN SELECT RAISE(ABORT, '测试更新失败'); END"))
-    await assert.rejects(service.commitPlanVersion(owner, result.planId, { ...input, title: '不应保存' }, { source: 'user' }))
+    await assert.rejects(service.savePlanVersion(owner, result.planId, { source: 'user', planJson: { ...input, title: '不应保存' } }))
     assert.equal(db.select().from(planVersions).all().length, 1)
     assert.equal((await service.getPlanSnapshot(owner, result.planId)).plan.title, input.title)
   },
@@ -175,7 +187,7 @@ const cases: Record<string, () => Promise<void>> = {
     assert.equal(db.select().from(planVersions).all().length, 1)
     assert.equal((await service.getPlanSnapshot(owner, planId)).plan.days.length, 0)
     await assert.rejects(
-      service.commitPlanVersion(owner, planId, { ...input, planId: 6 }, { source: 'user' }),
+      service.savePlanVersion(owner, planId, { source: 'user', planJson: { ...input, planId: 6 } }),
       { statusCode: 400 },
     )
     assert.equal(db.select().from(planVersions).all().length, 1)
@@ -260,8 +272,8 @@ const cases: Record<string, () => Promise<void>> = {
     await assert.rejects(service.patchPlan('other', planId, { title: '越权' }, { source: 'user' }), { statusCode: 404 })
     await assert.rejects(service.deletePlan('other', planId), { statusCode: 404 })
     const other = await service.createPlan(owner, input)
-    const parent = await service.getLatestVersion(other.planId)
-    await assert.rejects(service.commitPlanVersion(owner, planId, input, { source: 'user', parentVersionId: parent!.id }), { statusCode: 404 })
+    const parent = await service.getPlanSnapshot(owner, other.planId)
+    await assert.rejects(service.savePlanVersion(owner, planId, { source: 'user', planJson: input, parentVersionId: parent.current!.id }), { statusCode: 404 })
     assert.equal(db.select().from(planVersions).where(eq(planVersions.planId, planId)).all().length, 1)
   },
   async agentsScope() {

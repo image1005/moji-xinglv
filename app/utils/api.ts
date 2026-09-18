@@ -1,70 +1,10 @@
 import type { Plan } from '#shared/schemas/plan'
-import type { MessageRecord, PlanPreview, PlanSource } from '#shared/types'
+import type { MessageRecord, PlanPreview } from '#shared/types'
 
-export interface SessionUser {
-  id: string
-  email: string
-  name: string
-  role: 'user' | 'admin'
-}
-
-export interface PlanListItem {
-  id: number
-  title: string
-  summary: string
-  coverUrl: string
-  version: number
-  revision: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PlanDetail {
-  id: number
-  title: string
-  summary: string
-  contentMd: string
-  coverUrl: string
-  plan: Plan
-  version: number
-  revision: number
-  createdAt: string
-  updatedAt: string
-}
-
-export interface ConversationItem {
-  id: number
-  planId: number
-  title: string
-  createdAt: string
-  updatedAt: string
-}
-
-export interface VersionItem {
-  id: number
-  version: number
-  source: PlanSource
-  parentVersionId: number | null
-  messageId: number | null
-  createdAt: string
-  diffJson: { path: string; before?: unknown; after?: unknown; kind: string }[] | null
-}
-
-export interface SaveResult {
-  planId: number
-  version: number
-  revision: number
-  versionId: number | null
-  skipped: boolean
-  preview: PlanPreview
-}
-
-export interface Page<T> { items: T[]; nextCursor: string | null; hasMore: boolean }
-export interface MessagePage { nextCursor: string | null; hasMore: boolean }
-export interface ChatRun {
-  requestId: string; status: string; assistantMessageId: number | null; planId: number; conversationId: number
-  startedAt: string; updatedAt: string; finishedAt: string | null; errorCode: string | null; steps: number
-}
+import type { PlanListItem, PlanDetail, ConversationItem, VersionItem, SaveResult, ChatRun, Page } from '#shared/schemas/workspace'
+import { PlanListItemSchema, PlanDetailSchema, ConversationSchema, VersionSchema, SaveResultSchema, ChatRunSchema, MessageSchema, pageSchema } from '#shared/schemas/workspace'
+export type { SessionUser, PlanDetail, PlanListItem, ConversationItem, VersionItem, SaveResult } from '#shared/schemas/workspace'
+type MessagePage = Pick<Page<never>, 'nextCursor' | 'hasMore'>
 
 export function apiErrorMessage(error: unknown, fallback = '操作失败，请稍后重试'): string {
   type ErrorValue = { statusCode?: number; status?: number; statusMessage?: string; data?: { message?: string; statusMessage?: string }; message?: string }
@@ -86,14 +26,11 @@ export function apiErrorMessage(error: unknown, fallback = '操作失败，请�
 }
 
 export const api = {
-  me: () => $fetch<{ user: SessionUser }>('/api/me'),
-
   plans: {
-    list: () => $fetch<PlanListItem[]>('/api/plans'),
-    listPage: (cursor?: string, q?: string, sort?: 'created' | 'updated') => $fetch<Page<PlanListItem>>('/api/plans', { query: { paged: true, limit: 50, cursor, q, sort } }),
+    listPage: (cursor?: string, q?: string, sort?: 'created' | 'updated') => $fetch<Page<PlanListItem>>('/api/plans', { query: { paged: true, limit: 50, cursor, q, sort } }).then(result => pageSchema(PlanListItemSchema).parse(result)),
     create: (body: { title?: string; planJson?: unknown }) =>
       $fetch<{ planId: number; version: number }>('/api/plans', { method: 'POST', body }),
-    detail: (id: number) => $fetch<PlanDetail>(`/api/plans/${id}`),
+    detail: (id: number) => $fetch<PlanDetail>(`/api/plans/${id}`).then(result => PlanDetailSchema.parse(result)),
     updateMeta: (id: number, body: {
       title?: string
       summary?: string
@@ -107,31 +44,29 @@ export const api = {
     }) => $fetch<{ ok: boolean; revision: number }>(`/api/plans/${id}`, { method: 'PATCH', body }),
     remove: (id: number) => $fetch<{ ok: boolean }>(`/api/plans/${id}`, { method: 'DELETE' }),
     save: (id: number, body: { planJson?: unknown; conversationId?: number; expectedVersion?: number; expectedRevision?: number }) =>
-      $fetch<SaveResult>(`/api/plans/${id}/save`, { method: 'POST', body }),
+      $fetch<SaveResult>(`/api/plans/${id}/save`, { method: 'POST', body }).then(result => SaveResultSchema.parse(result)),
     switchVersion: (id: number, body: { version: number; conversationId?: number; expectedVersion?: number; expectedRevision?: number }) =>
       $fetch<{ version: number; revision: number; versionId: number; switched: true; preview: PlanPreview }>(`/api/plans/${id}/switch`, {
         method: 'POST',
         body,
       }),
-    versions: (id: number) => $fetch<VersionItem[]>(`/api/plans/${id}/versions`),
-    versionsPage: (id: number, cursor?: string) => $fetch<Page<VersionItem>>(`/api/plans/${id}/versions`, { query: { paged: true, limit: 50, cursor } }),
+    versionsPage: (id: number, cursor?: string) => $fetch<Page<VersionItem>>(`/api/plans/${id}/versions`, { query: { paged: true, limit: 50, cursor } }).then(result => pageSchema(VersionSchema).parse(result)),
     versionPlan: (id: number, version: number) =>
       $fetch<{ plan: Plan }>(`/api/plans/${id}/versions/${version}`),
   },
 
   conversations: {
-    list: (planId?: number) =>
-      $fetch<ConversationItem[]>('/api/conversations', { query: planId ? { planId } : {} }),
-    listPage: (planId?: number, cursor?: string, q?: string) => $fetch<Page<ConversationItem>>('/api/conversations', { query: { paged: true, limit: 50, planId, cursor, q } }),
+    listPage: (planId?: number, cursor?: string, q?: string) => $fetch<Page<ConversationItem>>('/api/conversations', { query: { paged: true, limit: 50, planId, cursor, q } }).then(result => pageSchema(ConversationSchema).parse(result)),
     create: (planId: number, title?: string) =>
       $fetch<ConversationItem>('/api/conversations', { method: 'POST', body: { planId, title } }),
-    detail: (id: number) =>
-      $fetch<{ conversation: ConversationItem; messages: MessageRecord[] }>(`/api/conversations/${id}`),
-    messagesPage: (id: number, cursor?: string) => $fetch<{ conversation: ConversationItem; messages: MessageRecord[]; messagePage: MessagePage }>(`/api/conversations/${id}`, { query: { paged: true, limit: 50, cursor } }),
+    messagesPage: (id: number, cursor?: string) => $fetch<{ conversation: ConversationItem; messages: MessageRecord[]; messagePage: MessagePage }>(`/api/conversations/${id}`, { query: { paged: true, limit: 50, cursor } }).then(result => {
+      const { items: messages, ...messagePage } = pageSchema(MessageSchema).parse({ items: result.messages, ...result.messagePage })
+      return { conversation: ConversationSchema.parse(result.conversation), messages, messagePage }
+    }),
     remove: (id: number) => $fetch<{ ok: boolean }>(`/api/conversations/${id}`, { method: 'DELETE' }),
   },
 
-  chatRuns: (conversationId: number) => $fetch<ChatRun[]>('/api/chat/runs', { query: { conversationId } }),
+  chatRuns: (conversationId: number) => $fetch<ChatRun[]>('/api/chat/runs', { query: { conversationId } }).then(result => ChatRunSchema.array().parse(result)),
 
   agentsMd: {
     get: (planId?: number | null) =>

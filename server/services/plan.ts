@@ -10,19 +10,20 @@ import { applyPlanEditOps, PlanEditError, type PlanEditOp } from '../../shared/u
 import { conversations, messages, plans, planVersions } from '../database/schema'
 import { db } from '../utils/db'
 import { finishPage, readPage } from './pagination'
+import { ensurePlanEntityIds } from '../../shared/utils/plan-entities'
 
 export type PlanRow = typeof plans.$inferSelect
-export type VersionRow = typeof planVersions.$inferSelect
+type VersionRow = typeof planVersions.$inferSelect
 type Transaction = Parameters<Parameters<typeof db.transaction>[0]>[0]
 type Reader = typeof db | Transaction
 
-export function parsePlanJson(input: unknown): Plan {
+export function parsePlanJson(input: unknown, previous?: Plan): Plan {
   const result = PlanSchema.safeParse(input)
   if (!result.success) {
     const detail = formatPlanIssues(result.error.issues).slice(0, 500)
     throw createError({ statusCode: 400, statusMessage: `行程 JSON 校验失败（${detail}）` })
   }
-  return result.data
+  return ensurePlanEntityIds(result.data, previous)
 }
 
 function readPlan(conn: Reader, userId: string, planId: number): PlanRow {
@@ -114,11 +115,6 @@ export async function listPlansPage(userId: string, options: PageOptions & { q?:
 
 export async function getPlanRow(userId: string, planId: number): Promise<PlanRow> {
   return readPlan(db, userId, planId)
-}
-
-/** 调用者须已校验规划归属；需要 JSON 与版本一致时使用 getPlanSnapshot。 */
-export async function getLatestVersion(planId: number): Promise<VersionRow | undefined> {
-  return readLatestVersion(db, planId)
 }
 
 export async function getPlanSnapshot(userId: string, planId: number) {
@@ -248,6 +244,17 @@ function assertMessageScope(tx: Transaction, row: PlanRow, opts: CommitOptions) 
 function commitMutation(tx: Transaction, snapshot: Snapshot, next: Plan, opts: CommitOptions) {
   assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
   assertMessageScope(tx, snapshot.row, opts)
+  if (opts.source === 'ai') {
+    // Model guesses are never location evidence. Existing user/provider-confirmed points may
+    // be retained for the same place; new locations stay null until the place service resolves them.
+    const locationKey = (city: string, spot: Plan['days'][number]['spots'][number]) => stableStringify([city.trim(), spot.name.trim(), spot.address.trim(), spot.lng, spot.lat])
+    const known = new Set(snapshot.plan.days.flatMap(day => day.spots.filter(spot => spot.lng !== null && spot.lat !== null).map(spot => locationKey(day.city, spot))))
+    for (const day of next.days) for (const spot of day.spots) {
+      if (spot.lng !== null && spot.lat !== null && !known.has(locationKey(day.city, spot))) {
+        throw createError({ statusCode: 400, statusMessage: 'AI 不可提交未经核实的坐标；新地点或地点变更请将 lng/lat 同时设为 null，由地点服务定位，用户仍可手工补全' })
+      }
+    }
+  }
   if (opts.parentVersionId != null) {
     const parent = tx.select({ id: planVersions.id }).from(planVersions)
       .where(and(eq(planVersions.id, opts.parentVersionId), eq(planVersions.planId, snapshot.row.id))).get()
@@ -286,7 +293,7 @@ export async function applyPlanEdits(
     assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     let next: Plan
     try {
-      next = parsePlanJson(applyPlanEditOps(snapshot.plan, edits))
+      next = parsePlanJson(applyPlanEditOps(snapshot.plan, edits), snapshot.plan)
     } catch (error) {
       if (error instanceof PlanEditError) throw createError({ statusCode: 400, statusMessage: error.message })
       throw error
@@ -333,18 +340,6 @@ export async function createPlan(
   }, { behavior: 'immediate' })
 }
 
-export async function commitPlanVersion(
-  userId: string,
-  planId: number,
-  nextInput: unknown,
-  opts: CommitOptions,
-) {
-  return db.transaction((tx) => {
-    const snapshot = readSnapshot(tx, userId, planId)
-    return commitMutation(tx, snapshot, parsePlanJson(nextInput), opts)
-  }, { behavior: 'immediate' })
-}
-
 /** 读、合并、版本比较与写入在同一事务内，防止数组 patch 覆盖并发修改。 */
 export async function patchPlan(userId: string, planId: number, patch: unknown, opts: CommitOptions) {
   if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
@@ -353,7 +348,7 @@ export async function patchPlan(userId: string, planId: number, patch: unknown, 
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
     assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
-    const next = parsePlanJson(applyMergePatch(snapshot.plan, patch))
+    const next = parsePlanJson(applyMergePatch(snapshot.plan, patch), snapshot.plan)
     return commitMutation(tx, snapshot, next, opts)
   }, { behavior: 'immediate' })
 }
@@ -479,7 +474,7 @@ export async function savePlanVersion(
   return db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
     assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
-    const next = opts.planJson === undefined ? snapshot.plan : parsePlanJson(opts.planJson)
+    const next = opts.planJson === undefined ? snapshot.plan : parsePlanJson(opts.planJson, snapshot.plan)
     const result = commitMutation(tx, snapshot, next, opts)
     appendSystemMessage(tx, opts.conversationId, result, result.skipped ? '内容无变化，未生成新版本' : `已保存为 v${result.version}`)
     return result

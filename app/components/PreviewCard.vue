@@ -9,7 +9,7 @@ const ws = useWorkspace()
 const busy = ref(false)
 const copied = ref(false)
 const showDiff = ref(false)
-const expanded = ref(false)
+const expanded = ref(true)
 const loadingDiff = ref(false)
 const failure = ref('')
 const samePlan = computed(() => ws.currentPlan.value?.id === props.preview.planId)
@@ -103,6 +103,8 @@ async function undo() {
             <CachedImage :src="spot.panorama" :alt="`${spot.name} 街景`" />
           </div>
         </div>
+        <p v-if="preview.foodJournal?.length" class="preview-card__note">风物食记：{{ preview.foodJournal.map(item => item.name).join(' · ') }}</p>
+        <PlanMediaGallery v-if="expanded && samePlan && ws.currentPlan.value && preview.version === currentPlanVersion" :plan-id="preview.planId" :revision="ws.currentPlan.value.revision" :plan="ws.currentPlan.value.plan" compact />
       </div>
     </div>
 
@@ -110,6 +112,7 @@ async function undo() {
 
     <div class="preview-card__actions">
       <button class="preview-card__action" @click="copyJson">{{ copied ? '已复制' : '复制 JSON' }}</button>
+      <button class="preview-card__action" @click="ws.openPlanView(preview.planId)">打开图文行程与地图</button>
       <button class="preview-card__action" :disabled="loadingDiff || !samePlan || ws.offline.value" @click="toggleDiff">
         {{ loadingDiff ? '读取变更…' : diffLoaded ? `变更 ${diff.length} 处` : '查看变更' }}
       </button>

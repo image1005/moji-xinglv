@@ -4,6 +4,7 @@ import { expect, it } from 'vitest'
 
 // Vitest 使用 Node worker；SQLite 服务只在独立 Bun 进程的内存连接上执行。
 it.each([
+  ['locationEvidence', '模型新坐标被拒绝，手工确认坐标仍可保存与复用'],
   ['createRollback', '创建初始版本失败时回滚规划'],
   ['commitRollback', '更新规划失败时回滚新版本'],
   ['concurrentCas', '并发 CAS 只接受一个写入并拒绝陈旧保存与切换'],

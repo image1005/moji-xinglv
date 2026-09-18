@@ -5,6 +5,8 @@ import { chatRuns } from '../database/operations'
 import { conversations, messages } from '../database/schema'
 import { aiConfig } from '../utils/ai-config'
 import { db } from '../utils/db'
+import { stableStringify } from '../../shared/utils/json'
+import type { ModelConfiguration } from '../../shared/schemas/model-config'
 
 export type RunStatus = typeof chatRuns.$inferSelect.status
 export const publicRun = (row: typeof chatRuns.$inferSelect) => ({
@@ -17,9 +19,10 @@ const active = ['running', 'queued'] as const
 const limitError = (message: string, retryAfter: number) => createError({ statusCode: 429, statusMessage: message, data: { retryAfter } })
 
 /** Claim request identity before waiting or appending messages. A retry never executes tools again. */
-export function claimRun(userId: string, requestId: string, planId: number, conversationId: number, input: string) {
+export function claimRun(userId: string, requestId: string, planId: number, conversationId: number, input: { text: string; attachmentIds: string[]; configuration: ModelConfiguration }) {
   const config = aiConfig()
-  const hash = createHash('sha256').update(JSON.stringify([planId, conversationId, input])).digest('hex')
+  const identity = { ...input, text: input.text.trim().normalize('NFC') }
+  const hash = createHash('sha256').update(stableStringify({ planId, conversationId, ...identity })).digest('hex')
   return db.transaction(tx => {
     const existing = tx.select().from(chatRuns).where(and(eq(chatRuns.userId, userId), eq(chatRuns.requestId, requestId))).get()
     if (existing) throw createError({ statusCode: 409, statusMessage: existing.requestHash === hash ? '此请求已提交，请恢复已有生成结果' : '请求编号已用于其他内容，请使用新的请求编号', data: publicRun(existing) })
@@ -34,7 +37,7 @@ export function claimRun(userId: string, requestId: string, planId: number, conv
     const running = current.filter(row => row.status === 'running')
     const canRun = running.length < config.AI_GLOBAL_CONCURRENCY && running.filter(row => row.userId === userId).length < config.AI_USER_CONCURRENCY && !current.some(row => row.status === 'queued' && row.userId === userId)
     if (!canRun && (current.filter(row => row.status === 'queued').length >= config.AI_QUEUE_LIMIT || config.AI_QUEUE_WAIT_MS === 0)) throw limitError('AI 正在繁忙，请稍后重试', 5)
-    return tx.insert(chatRuns).values({ userId, requestId, requestHash: hash, planId, conversationId, status: canRun ? 'running' : 'queued' }).returning().get()
+    return tx.insert(chatRuns).values({ userId, requestId, requestHash: hash, planId, conversationId, configurationJson: identity.configuration, status: canRun ? 'running' : 'queued' }).returning().get()
   }, { behavior: 'immediate' })
 }
 

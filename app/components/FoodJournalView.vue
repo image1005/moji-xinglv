@@ -185,6 +185,7 @@ onBeforeUnmount(() => { scope++ })
       <span class="food-journal__hero-seal" aria-hidden="true">食<br>记</span>
     </header>
 
+    <PlanMediaGallery v-if="currentPlan && entries.length" :plan-id="currentPlan.id" :revision="currentPlan.revision" :plan="currentPlan.plan" only="food" />
     <div v-if="!currentPlan" class="food-journal__empty"><h3>先展开一本行笺</h3><p>选择或新建工作区，即可拥有专属美食手账。</p></div>
     <template v-else>
       <div class="food-journal__summary">

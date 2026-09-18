@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { apiErrorMessage } from '~/utils/api'
+import type { Attachment } from '#shared/schemas/attachment'
+import type { ModelConfiguration } from '#shared/schemas/model-config'
 
 const {
-  chat, conversations, currentPlan, currentConversationId, errorMessage, savedAt,
+  chat, conversations, currentPlan, currentConversationId, errorMessage, savedAt, modelSettings, attachmentDrafts, processingStatus,
   loading, sendMessage, retryMessage, stop, savePlan, newSession, createWorkspace, messagesHasMore, loadingHistory, loadOlderMessages, runs, reloadConversation, refreshRuns, offline,
 } = useWorkspace()
 const tab = ref<'chat' | 'roadmap'>('chat')
@@ -16,7 +18,12 @@ const sending = ref(false)
 const saving = ref(false)
 const composing = ref(false)
 const localError = ref('')
-const lastRequest = ref<{ key: string; text: string } | null>(null)
+const lastRequest = ref<{ key: string; text: string; attachments: Attachment[]; configuration: ModelConfiguration } | null>(null)
+const fileInput = ref<HTMLInputElement | null>(null)
+const draggingFiles = ref(false)
+const uploads = computed(() => attachmentDrafts.drafts[draftKey.value] ?? [])
+const uploadsReady = computed(() => uploads.value.every(item => item.status === 'ready'))
+const processingLabel = computed(() => ({ queued: '生成任务排队中…', submitted: '正在提交旅行需求…', running: '正在生成行程…', saving: '正在保存行程…' }[processingStatus.value] ?? '正在接收回复…'))
 const guide = reactive({ destination: '', days: 3, budget: '', people: 2, pace: '舒缓' })
 const latestRun = computed(() => runs.value[0])
 const messages = computed(() => chat.value?.messages ?? [])
@@ -24,7 +31,7 @@ const streaming = computed(() => chat.value?.status === 'streaming' || chat.valu
 const busy = computed(() => loading.value || sending.value || saving.value || streaming.value || offline.value)
 const conversation = computed(() => conversations.value.find((c) => c.id === currentConversationId.value) ?? null)
 const visibleError = computed(() => localError.value || errorMessage.value)
-const canRestore = computed(() => lastRequest.value?.key === draftKey.value && !!lastRequest.value.text)
+const canRestore = computed(() => lastRequest.value?.key === draftKey.value && (!!lastRequest.value.text || !!lastRequest.value.attachments.length))
 const suggestions = [
   { icon: 'leaf', number: '壹', title: '寻一城烟火', route: '杭州 · 人文慢游', prompt: '想去杭州玩 3 天，喜欢江南园林、老街和当地小吃，节奏慢一点，请帮我规划行程。', tag: '城市漫游' },
   { icon: 'mountain', number: '贰', title: '赴一场山海', route: '大理 · 山野寻风', prompt: '帮我安排大理 5 日旅行，想看看苍山洱海、逛当地市集，留出发呆和拍照的时间。', tag: '自然疗愈' },
@@ -83,8 +90,10 @@ function useSuggestion(prompt: string) {
 
 async function submit() {
   const text = input.value.trim()
-  if (!text || busy.value || composing.value) return
+  if ((!text && !uploads.value.length) || !uploadsReady.value || busy.value || composing.value) return
   const originalKey = draftKey.value
+  const entries = [...uploads.value]
+  const attachments = entries.flatMap(item => item.attachment ? [item.attachment] : [])
   let requestKey = originalKey
   sending.value = true
   localError.value = ''
@@ -101,11 +110,13 @@ async function submit() {
     }
     requestKey = draftKey.value
     drafts[requestKey] = text
-    lastRequest.value = { key: requestKey, text }
-    const result = await sendMessage(text)
+    const configuration = await modelSettings.snapshot()
+    lastRequest.value = { key: requestKey, text, attachments, configuration }
+    const result = await sendMessage(text, attachments, configuration)
     if (result !== null && !errorMessage.value) {
       drafts[originalKey] = ''
       drafts[requestKey] = ''
+      attachmentDrafts.consume(originalKey, entries.map(item => item.key))
     }
   } catch (error) {
     drafts[requestKey] = text
@@ -134,8 +145,37 @@ async function retryAsNewTurn() {
   if (!window.confirm('已保存的行程改动会保留。将这段需求作为新一轮发送，请先确认不需要调整需求。')) return
   sending.value = true
   try {
-    if (await retryMessage(lastRequest.value.text)) input.value = ''
+    if (await retryMessage(lastRequest.value.text, lastRequest.value.attachments, lastRequest.value.configuration)) input.value = ''
   } finally { sending.value = false }
+}
+
+async function acceptFiles(files: File[]) {
+  if (busy.value || !files.length) return
+  if (!modelSettings.capabilities.value?.vision) { localError.value = '当前模型不支持图片理解，请先配置视觉模型。'; return }
+  const text = input.value
+  const previous = draftKey.value
+  if (!currentPlan.value && !await createWorkspace('图片旅行行笺')) return
+  if (!chat.value && !await newSession()) return
+  if (!currentPlan.value) return
+  drafts[draftKey.value] = text
+  if (previous !== draftKey.value) drafts[previous] = ''
+  attachmentDrafts.add(draftKey.value, currentPlan.value.id, files)
+}
+function selectFiles(event: Event) {
+  const target = event.target as HTMLInputElement
+  const files = Array.from(target.files ?? [])
+  target.value = ''
+  void acceptFiles(files)
+}
+function pasteFiles(event: ClipboardEvent) {
+  const files = Array.from(event.clipboardData?.files ?? [])
+  if (!files.length) return
+  event.preventDefault()
+  void acceptFiles(files)
+}
+function dropFiles(event: DragEvent) {
+  draggingFiles.value = false
+  void acceptFiles(Array.from(event.dataTransfer?.files ?? []))
 }
 
 async function onSave() {
@@ -253,7 +293,7 @@ async function onSave() {
           <span class="ring ring-inner" />
           <span class="ink-core" />
         </div>
-        <span class="streaming-text">山海寻思 · 正在细细编排旅途…</span>
+        <span class="streaming-text">{{ processingLabel }}</span>
       </div>
     </div>
 
@@ -271,7 +311,21 @@ async function onSave() {
         <button v-if="canRestore" class="btn btn--small btn--ghost" :disabled="busy" @click="retryAsNewTurn">作为新一轮重试</button>
       </div>
 
-      <div class="composer" :class="{ 'composer--busy': busy, 'is-generating': streaming }">
+      <ChatConfiguration :disabled="busy" />
+      <p v-if="attachmentDrafts.failure.value" class="feedback" role="alert">{{ attachmentDrafts.failure.value }}</p>
+      <div class="composer" :class="{ 'composer--busy': busy, 'is-generating': streaming, 'composer--dragging': draggingFiles }" @dragover.prevent="draggingFiles = true" @dragleave.self="draggingFiles = false" @drop.prevent="dropFiles" @paste="pasteFiles">
+        <div v-if="uploads.length" class="composer__attachments" aria-label="本轮图片附件">
+          <figure v-for="upload in uploads" :key="upload.key" class="composer__attachment">
+            <img :src="upload.preview" :alt="upload.file.name">
+            <figcaption>{{ upload.file.name }}</figcaption>
+            <progress v-if="upload.status === 'uploading'" :value="upload.progress" max="100" :aria-label="'上传 ' + upload.file.name" />
+            <span v-if="upload.status === 'ready'">已上传</span>
+            <span v-if="upload.error" role="alert">{{ upload.error }}</span>
+            <button v-if="upload.status === 'error'" type="button" :disabled="busy" @click="attachmentDrafts.retry(draftKey, upload.key)">重试</button>
+            <button type="button" :disabled="busy" :aria-label="'移除 ' + upload.file.name" @click="attachmentDrafts.remove(draftKey, upload.key)">移除</button>
+          </figure>
+        </div>
+        <p v-if="draggingFiles" class="composer__drop">放开以添加旅行照片、菜单或攻略截图</p>
         <label class="sr-only" for="travel-message">向旅行助手描述你的行程需求</label>
         <textarea
           id="travel-message"
@@ -286,7 +340,8 @@ async function onSave() {
           @compositionend="composing = false"
         />
         <div class="composer__bar">
-          <span class="composer__mode"><AppIcon name="spark" :size="13" />山海灵感</span>
+          <input ref="fileInput" class="sr-only" type="file" accept="image/jpeg,image/png,image/webp" multiple :disabled="busy || !modelSettings.capabilities.value?.vision" aria-label="选择旅行图片" @change="selectFiles">
+          <button type="button" class="composer__attach" :disabled="busy || !modelSettings.capabilities.value?.vision || uploads.length >= 4" title="选择、拖拽或粘贴图片，每张最多 5 MiB" @click="fileInput?.click()"><AppIcon name="mountain" :size="14" />添加图片</button>
           <span class="composer__divider" />
           <span class="composer__hint">{{ loading ? '正在加载行笺…' : streaming ? '正在生成，可随时停止' : 'Enter 发送 · Shift + Enter 换行' }}</span>
           <button v-if="currentPlan" class="composer__save" :disabled="busy" title="保存当前行程为新版本" @click="onSave">
@@ -295,7 +350,7 @@ async function onSave() {
           <button v-if="streaming" class="composer__send composer__send--stop" title="停止生成" aria-label="停止生成" @click="stop()">
             <AppIcon name="stop" :size="15" />
           </button>
-          <button v-else class="composer__send" :disabled="!input.trim() || busy" title="发送消息" aria-label="发送消息" @click="submit">
+          <button v-else class="composer__send" :disabled="(!input.trim() && !uploads.length) || !uploadsReady || busy" title="发送消息" aria-label="发送消息" @click="submit">
             <AppIcon name="send" :size="16" />
           </button>
         </div>
@@ -312,6 +367,18 @@ async function onSave() {
 
 <style lang="scss" scoped>
 @use "~/assets/styles/variables" as *;
+
+.composer--dragging { outline: 2px dashed var(--bamboo); }
+.composer__attachments { display: flex; overflow-x: auto; gap: 10px; padding: 12px; }
+.composer__attachment { margin: 0; width: 115px; flex-shrink: 0; padding: 6px; border: 1px solid var(--border-primary); border-radius: 5px; font-size: 10px; }
+.composer__attachment img { width: 100%; height: 76px; object-fit: cover; border-radius: 3px; }
+.composer__attachment figcaption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 4px 0; }
+.composer__attachment progress { width: 100%; accent-color: var(--bamboo); }
+.composer__attachment span { display: block; line-height: 1.5; color: var(--text-muted); }
+.composer__attachment button, .composer__attach { border: 0; background: transparent; color: var(--bamboo); cursor: pointer; font: inherit; padding: 4px; }
+.composer__attach { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; font-size: 11px; }
+.composer__attach:disabled { opacity: .5; cursor: not-allowed; }
+.composer__drop { color: var(--bamboo); text-align: center; font-size: 12px; }
 
 .travel-guide {
   padding: 20px;

@@ -11,7 +11,7 @@ describe('AI 输入预算与按需规划事实', () => {
     const latest = '当前要求：把第三天下午改为休息，保留已订住宿。'
     const result = trustedHistory(records, latest, 24000)
     expect(jsonBytes(result)).toBeLessThanOrEqual(24000)
-    expect(result.at(-1)?.parts[0]?.text).toBe(latest)
+    expect(result.at(-1)?.parts[0]).toMatchObject({ type: 'text', text: latest })
     expect(JSON.stringify(result)).toContain('总预算不超过两千元')
     expect(JSON.stringify(result)).toContain('db-1')
     expect(result.every(item => item.role !== ('system' as string))).toBe(true)
