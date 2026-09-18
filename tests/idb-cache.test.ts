@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchBlobCached, fetchJsonCached, selectCacheEvictions, setCacheUser } from '../app/utils/idb'
+import { fetchBlobCached, selectCacheEvictions, setCacheUser } from '../app/utils/idb'
 
 beforeEach(async () => {
   vi.stubGlobal('window', {})
@@ -74,12 +74,6 @@ describe('缓存失败降级与身份隔离', () => {
     vi.stubGlobal('fetch', fetcher)
     expect(await fetchBlobCached('/api/panorama?location=1,2')).toBe(blob)
     expect(fetcher).toHaveBeenCalledTimes(1)
-  })
-
-  it('IndexedDB 不可用时仍返回 JSON，包括 false 值', async () => {
-    await setCacheUser('user-a')
-    vi.stubGlobal('$fetch', vi.fn().mockResolvedValue(false))
-    expect(await fetchJsonCached('/api/example')).toBe(false)
   })
 
   it('已取消的图片请求不发起网络调用', async () => {

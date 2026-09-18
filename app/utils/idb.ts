@@ -2,7 +2,7 @@
 const DB_NAME = 'guofeng-travel'
 const STORE = 'kv'
 const META = 'metadata'
-export const CACHE_MAX_BYTES = 48 * 1024 * 1024
+const CACHE_MAX_BYTES = 48 * 1024 * 1024
 const MAX_ENTRIES = 300
 interface CacheMeta { key: string; expiresAt: number; lastAccess: number; bytes: number }
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -50,6 +50,7 @@ async function transaction<T>(run: (data: IDBObjectStore, meta: IDBObjectStore, 
   })
 }
 
+/** @internal Exported only for deterministic capacity/TTL policy tests; idbSet owns production use. */
 export function selectCacheEvictions(entries: CacheMeta[], now = Date.now(), maxBytes = CACHE_MAX_BYTES, maxEntries = MAX_ENTRIES): string[] {
   const ordered = [...entries].sort((a, b) => a.lastAccess - b.lastAccess)
   let bytes = ordered.reduce((total, entry) => total + entry.bytes, 0)
@@ -195,17 +196,4 @@ export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?
     signal?.addEventListener('abort', abort, { once: true })
     shared.promise.then((blob) => { if (release()) resolve(blob) }, (error: unknown) => { if (release()) reject(error) })
   })
-}
-
-export async function fetchJsonCached<T>(url: string, ttlSeconds = 3600): Promise<T> {
-  const generation = cacheGeneration
-  const key = `json:${url}`
-  const cached = await idbGet<T>(key).catch(() => null)
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载数据')
-  if (cached !== null) return cached
-  const data = await $fetch(url) as T
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载数据')
-  await idbSet(key, data, ttlSeconds).catch(() => {})
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载数据')
-  return data
 }

@@ -26,7 +26,7 @@ jobs:
           bun-version: '1.4'
       - name: 按锁文件安装依赖
         run: bun install --frozen-lockfile
-      - name: 执行代码检查、类型检查与测试
+      - name: 执行代码、类型、测试与 Knip 全量和生产入口检查
         run: bun run check
       - name: 构建生产产物
         run: bun run build
