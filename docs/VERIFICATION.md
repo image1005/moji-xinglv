@@ -1,4 +1,32 @@
-# 山海行笺：本次检查记录
+# 山海行笺：实际验证记录
+
+## 2026-09-18 架构与图文产品交付
+
+目录 `E:\hbws\moji-xinglv-new\moji-xinglv-main`，实施分支 `codex/travel-delivery`。逐项产品核对和环境边界见 [DELIVERY](DELIVERY.md)，原始清理前结果见 [ARCHITECTURE_BASELINE](ARCHITECTURE_BASELINE.md)。所有 SQLite 验收均使用独立临时数据库，未迁移真实业务库。用户原有鉴权、侧栏和浏览器测试修改完整保留。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `bun run check` | 最终复核通过：lint、Nuxt与脚本typecheck、31文件250测试、Knip全量及生产扫描；日志 .verification/delivery/check.log |
+| `bun run build` | 生产构建通过，约42.6 MB / 14.1 MB gzip；相比基线新增服务端 sharp/libvips |
+| `bun run test:integration` | 11项HTTP断言通过：登录权限、真实行程内容、校验/冲突、版本分支/切换、系统消息和级联清理 |
+| `bun run test:recovery` | 5阶段通过：真实工具提交→强制终止自建服务→同库重启→已提交预览/任务中断恢复→重复ID拒绝和新轮可继续 |
+| `bun run test:browser` | 10阶段通过：双工作区/表单草稿、刷新、409比较应用、同工作区继续生成、版本切换、移动端焦点/视口、退出换号隔离；无未捕获UI异常 |
+| `bun run verify:media` | 旧0002→0003存量附件→0004/0005升级；20类断言通过，含历史保留、真实图片解码、附件多引用/清理/越权、稳定ID/修订写回/不建版本、缓存身份和部分失败保留、真实Mastra纯图两轮 |
+| DeepSeek真实探针 | 9请求，8成功合计1435 tokens；文字/视觉/工具/low-high-max/带reasoning的工具回传通过；思考+强制tool_choice为400，生产使用auto |
+| Wikimedia真实探针 | 西湖与东坡肉实图成功取得、完整解码，保留作者与许可；详见 [MEDIA_ATTACHMENTS](MEDIA_ATTACHMENTS.md) |
+| `bun run test:product` | 最终构建6阶段全通过：纯图上传失败重试→JSONL/搜索/思考max→景点食记图及每日地图/图片503重试→编辑保存/刷新恢复/历史图片追问/关闭搜索+low→浏览器取消与刷新→跨用户和工作区权限/伪图拒绝；无UI异常 |
+
+最终图文浏览器报告：`.verification/product/2026-09-18T14-02-39-225Z/report.json`。6次本地模型请求，5次带真实上传后的图片parts，1次模拟搜索、2次真实结构化行程提交；3次应用聊天均为JSONL且正文不含base64。截图 `illustrated-itinerary.png` 与 `restored-image-history.png` 已人工检查；截图中纯色图及来源文案明确属于隔离夹具。品牌16/32/64/128像素渲染已检查。
+
+最后的188份浏览器JS/HTML/CSS/JSON产物检查未包含已配置的服务端密钥，原auth测试与开始时副本逐字相同。`git diff --check` 通过；现有上游 Vue exports/Zod PURE 构建警告和 H3 statusMessage 长文案提示仍存在，未掩盖为新错误或删除测试规避。
+
+本机报告与日志在 `.verification/delivery`、`.verification/browser`、`.verification/recovery`、`.verification/product`；脚本可复现，CI保留浏览器截图和报告。CI使用显式本地模型/供应商夹具、fixture-only key与临时数据库，夹具图片/来源明确标为测试，不证明真实供应商可达性或识别准确率。尚无 Tavily/百度凭据，需配置相应key后真实联调；没有以假成功补齐报告。
+
+本轮发现并修复的实际故障包括：Windows Bun子进程PATH；Nuxt共享JSONL相对导入SSR打包；Bun structuredClone不能克隆Mastra图片URL；图片误计入文字预算；取消等待revision后仍提交；旧附件引用迁移；稳定实体改名的浏览器缓存错图；第13个派生资源未自动加载。对应测试验证可观察业务结果，不以mock调用次数替代持久化检查。
+
+## 以下为历史记录（截至2026-09-16，不代表当前实现）
+
+下文保留当时证据和修复过程，其中旧架构、测试数量、权限及功能限制已被上方本次记录和现行使用／技术文档替代。
 
 日期：2026-09-16。检查目录：`E:\hbws\moji-xinglv-new\moji-xinglv-main`。目标：理解当前项目并编写 [使用手册](USER_MANUAL.md) 与 [技术实现说明](TECHNICAL_GUIDE.md)。
 

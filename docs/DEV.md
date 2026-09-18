@@ -4,10 +4,10 @@
 
 ```
 浏览器（Nuxt 4 / Vue 3）
-  ├─ app/composables/useWorkspace.ts   按 Nuxt app 隔离的工作区状态：规划 / 会话 / 消息 / 版本
-  ├─ @ai-sdk/vue Chat ──► POST /api/chat（流式，AI SDK v5 协议）
+  ├─ app/composables/useWorkspace.ts   过渡统一入口 → features/workspace 各职责模块，按 Nuxt app 与用户隔离
+  ├─ @ai-sdk/vue Chat → JsonlChatTransport → POST /api/chat（应用 JSONL，SDK 内部仍为 v5 parts）
   ├─ usePlanDraft / localStorage（用户 + 规划 + 对象草稿，记录原 revision）
-  └─ IndexedDB 缓存（图片、规划快照，TTL + 字节容量 + 访问索引；POI 仅检索当前规划）
+  └─ IndexedDB 缓存（图片、规划快照，TTL + 字节容量 + 访问索引）
 
 Nitro（Bun 运行时）
   ├─ server/agents/        Mastra Agent + 受限工具集（全部以 planId 作用域校验，AI 仅 patch）
@@ -25,7 +25,7 @@ Nitro（Bun 运行时）
 2. **切换版本（Undo）**：校验当前 `expectedVersion`、`expectedRevision` 与会话归属 → 读取目标版本 → 设置当前规划快照与 `current_version_id`，递增 revision（**不新建版本**）→ 同事务插入系统消息与预览。
    历史永不删除；过期写入返回 409。切换后继续编辑会以 `max(version)+1` 追加版本、以当前版本为父，版本路线图据此分叉。
 3. **百度请求**：相同参数单飞去重 → `hashKey(api, params)` → Nitro storage → SQLite `cache` 表 → 未命中才带 AK 请求百度 → 回写。二进制 L1 使用可序列化 base64 与绝对过期时间，L2 命中回填剩余 TTL；前端再包一层按用户隔离的 IndexedDB。历史 `panoramas` 表保留兼容，但新图片统一使用 `cache`。
-   仅允许 `staticimage/v2` 与 `panorama/v2`，不使用在线 POI、路线导航或浏览器地图 SDK。
+   允许 `staticimage/v2`、`panorama/v2` 及资源补齐使用的 `place/v2/search`、`geocoding/v3`；按城市、名称、地址消歧。原 search_poi 仍只查规划。没有道路导航或浏览器地图 SDK。
 4. **生成与恢复**：先以 `(userId, requestId)` 在 `chat_runs` 去重、分配并发/队列名额，再追加用户/助手消息。工具结果和周期检查点落库，终态幂等收尾；重启将活动任务标记 interrupted。恢复只读取已有结果，明确新一轮才换 requestId。输入处理器每次模型调用都计算规则、工具、历史和工具结果的字节预算。
 
 ## 目录与关键文件
@@ -37,7 +37,10 @@ Nitro（Bun 运行时）
 | `server/database/schema.ts` | 全部 Drizzle 表；auth 四表由 CLI 生成（`auth-schema.ts`） |
 | `server/agents/tools.ts` | Mastra 工具集：get_plan / apply_plan_edits / patch_plan_json（兜底）/ get_panorama / search_poi（含 planId 越权校验） |
 | `server/agents/travel-agent.ts` | 按请求构建 Agent（模型配置 + system prompt 注入） |
-| `server/api/chat.post.ts` | 流式聊天：消息持久化 + 流观察器 + finish 回写 |
+| `server/api/chat.post.ts` | HTTP 边界：鉴权、JSONL 校验、应用服务调用与响应 |
+| `server/services/chat-application.ts` | 运行生命周期、幂等、取消、队列、检查点、可信历史和完成落库 |
+| `server/services/chat-jsonl.ts`、`app/utils/chat-transport.ts` | 版本化 JSONL 与 AI SDK 消息流的薄适配 |
+| `server/providers/`、`services/{media,wikimedia,attachments,model-settings}.ts` | 供应商能力、搜索、实际图片、授权附件与配置；不另造 Agent 循环 |
 | `server/services/{ai-context,ai-history,chat-runs,metrics}.ts` | 分段上下文、可信需求历史、持久任务/额度、聚合服务指标 |
 | `server/agents/model-budget.ts` | 每次模型调用的完整输入字节预算与裁剪 |
 | `server/database/operations.ts` | `chat_runs` / `usage_metrics` 表定义 |
@@ -56,8 +59,8 @@ Nitro（Bun 运行时）
 
 - 鉴权：`user` / `session` / `account` / `verification`（Better Auth CLI 生成，勿手改；
   修改鉴权配置后运行 `bunx --bun @better-auth/cli generate --config <auth.ts> --output server/database/auth-schema.ts`）
-- 业务：`plans`（含 revision）、`plan_versions`、`panoramas`（历史兼容）、`cache`、`conversations`、`messages`、`agents_md`、`chat_runs`、`usage_metrics`
-- 迁移：改 `schema.ts` → `bun run db:generate` → `bun run db:migrate`；不要手改 `server/database/migrations/`
+- 业务：`plans`（含 revision）、`plan_versions`、`panoramas`（历史兼容）、`cache`、`conversations`、`messages`、`agents_md`、`chat_runs`、`usage_metrics`，以及附件、附件关联、模型设置与媒体资源表（以 schema 为准）
+- 迁移：改 `schema.ts` → `bun run db:generate` → 审查新增迁移 → 临时数据库验证 → 部署时 `bun run db:migrate`。不要改写已应用迁移；数据回填用 Drizzle custom migration。具体升级与回退见 [DELIVERY.md](DELIVERY.md)。
 
 ## 约定与约束
 
@@ -109,7 +112,7 @@ Nitro（Bun 运行时）
 
 `bun run db:backup --source <数据库> --output <新文件>` 用 SQLite `VACUUM INTO` 创建包含已提交 WAL 数据的一致性快照，拒绝源文件、日志文件及已有目标。`bun run db:restore:verify --backup <备份>` 只在新临时副本执行 integrity_check、foreign_key_check 与关键表计数，随后清理该临时副本。备份目录默认 `BACKUP_DIR=./backups`；正式恢复替换生产库仍属于部署维护操作，应单独安排停机与回滚。
 
-本轮实现、限制和最终验证结果统一记录在 [OPTIMIZATION_IMPLEMENTATION.md](OPTIMIZATION_IMPLEMENTATION.md)。
+本轮实现、限制和最终验证结果统一记录在 [DELIVERY.md](DELIVERY.md)。OPTIMIZATION_IMPLEMENTATION 保留此前阶段记录。
 
 ## 常见改法
 
