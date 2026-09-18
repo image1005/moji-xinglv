@@ -1,10 +1,14 @@
 import { createError } from 'h3'
+import { z } from 'zod'
+import type { ResourceLocation } from '../../shared/schemas/media'
+import type { PlanEntity } from '../../shared/utils/plan-entities'
+import { providerJson } from '../providers/http'
 import { PanoramaQuerySchema, StaticMapQuerySchema } from '../../shared/schemas/map'
 import { hashKey } from '../../shared/utils/hash'
-import { getCachedBinary, setCachedBinary } from './cache'
+import { getCachedBinary, setCachedBinary, getCachedJson, setCachedJson } from './cache'
 import { recordMetric } from './metrics'
 
-/** 唯一可以读取百度 AK 的模块。仅允许两种图片接口，不透传任意 URL。 */
+/** 唯一读取百度 AK 的模块；仅固定图片、地点检索和地理编码接口，不透传任意 URL。 */
 const BAIDU_BASE = 'https://api.map.baidu.com'
 const TTL = 60 * 60 * 24 * 7
 interface ImageResult { buffer: Buffer; contentType: string; cached: boolean }
@@ -119,4 +123,40 @@ export async function getStaticMapImage(input: StaticMapQuery, userId?: string):
   if (query.markers?.length) params.markers = query.markers.join('|')
   if (query.paths?.length) params.paths = query.paths.join('|')
   return fetchImage('staticimage/v2', params, userId)
+}
+
+const CoordinateSchema = z.object({ lng: z.number().min(-180).max(180), lat: z.number().min(-90).max(90) })
+const PlaceResultSchema = z.object({ status: z.number(), results: z.array(z.object({
+  name: z.string(), city: z.string().optional(), address: z.string().optional(), uid: z.string().optional(),
+  location: CoordinateSchema.optional(),
+})).optional() })
+const GeocodeSchema = z.object({ status: z.number(), result: z.object({ location: CoordinateSchema, level: z.string().optional() }).optional() })
+const normalizedPlace = (value: string) => value.normalize('NFKC').replace(/[\s市]/g, '').toLocaleLowerCase()
+/** Opt-in server-side place lookup. Ambiguous results stay unlocated. Never accepts model coordinates. */
+export async function locateEntity(entity: PlanEntity): Promise<ResourceLocation | null> {
+  const ak = process.env.BAIDU_MAP_AK
+  if (!ak || !entity.city.trim() || entity.entityType === 'food') return null
+  const cacheId = await hashKey('baidu-place-v1', { city: entity.city, name: entity.name, address: entity.address, type: entity.entityType })
+  const cached = await getCachedJson<ResourceLocation | { missing: true }>(cacheId)
+  if (cached) return 'missing' in cached ? null : cached
+  const query = new URL(entity.entityType === 'city' ? 'https://api.map.baidu.com/geocoding/v3/' : 'https://api.map.baidu.com/place/v2/search')
+  query.search = new URLSearchParams(entity.entityType === 'city'
+    ? { address: entity.city, city: entity.city, output: 'json', ret_coordtype: 'bd09ll', ak }
+    : { query: entity.name, region: entity.city, city_limit: 'true', output: 'json', scope: '2', page_size: '10', ak }).toString()
+  const payload = await providerJson(query)
+  let result: ResourceLocation | null = null
+  if (entity.entityType === 'city') {
+    const geocode = GeocodeSchema.parse(payload)
+    if (geocode.status !== 0) throw createError({ statusCode: 502, statusMessage: '百度地点服务暂不可用，请核对服务端授权' })
+    if (geocode.result?.location && ['城市', '区县', '乡镇', '村庄'].includes(geocode.result.level || '')) result = { ...geocode.result.location, coordinateSystem: 'bd09ll', provider: '百度地理编码', sourceUrl: 'https://map.baidu.com/' }
+  } else {
+    const places = PlaceResultSchema.parse(payload)
+    if (places.status !== 0) throw createError({ statusCode: 502, statusMessage: '百度地点服务暂不可用，请核对服务端授权' })
+    const matches = (places.results ?? []).filter(place => normalizedPlace(place.name) === normalizedPlace(entity.name)
+      && place.city && normalizedPlace(place.city) === normalizedPlace(entity.city)
+      && (!entity.address || normalizedPlace(place.address ?? '').includes(normalizedPlace(entity.address))))
+    if (matches.length === 1 && matches[0]!.location) result = { ...matches[0]!.location!, coordinateSystem: 'bd09ll', provider: '百度地点检索', sourceUrl: matches[0]!.uid ? `https://map.baidu.com/?uid=${encodeURIComponent(matches[0]!.uid!)}` : 'https://map.baidu.com/' }
+  }
+  await setCachedJson(cacheId, result ?? { missing: true }, result ? 7 * 86400 : 3600)
+  return result
 }

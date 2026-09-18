@@ -6,8 +6,8 @@ import { applyMergePatch } from './merge-patch'
  * 原子编辑操作：由 apply_plan_edits 工具与服务层共用。
  * target 决定对象，action 决定动作，value 为该对象的部分字段（合并语义同 RFC7396）。
  */
-export type PlanEditTarget = 'plan' | 'day' | 'spot' | 'food' | 'checklist'
-export type PlanEditAction = 'add' | 'update' | 'remove' | 'move' | 'status' | 'toggle'
+type PlanEditTarget = 'plan' | 'day' | 'spot' | 'food' | 'checklist'
+type PlanEditAction = 'add' | 'update' | 'remove' | 'move' | 'status' | 'toggle'
 
 export interface PlanEditOp {
   target: PlanEditTarget
@@ -110,7 +110,7 @@ export function applyPlanEditOps(plan: Plan, ops: readonly PlanEditOp[]): Plan {
           spots.splice(index, 1)
           return
         }
-        spots[index] = parseValue(SpotSchema, applyMergePatch(spots[index], op.value ?? {}), label, '景点')
+        spots[index] = parseValue(SpotSchema, { ...applyMergePatch(spots[index], op.value ?? {}) as Record<string, unknown>, id: spots[index]!.id }, label, '景点')
         return
       }
       case 'food': {

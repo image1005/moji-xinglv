@@ -3,6 +3,8 @@ import { z } from 'zod'
 const setting = (fallback: number, max: number, min = 1) => z.coerce.number().int().min(min).max(max).default(fallback)
 const ConfigSchema = z.object({
   AI_INPUT_MAX_BYTES: setting(96000, 1000000, 32000),
+  AI_INPUT_MAX_IMAGE_BYTES: setting(20 * 1024 * 1024, 32 * 1024 * 1024, 1024 * 1024),
+  AI_INPUT_MAX_IMAGES: setting(12, 12),
   AI_OUTPUT_MAX_TOKENS: setting(4096, 32000, 256),
   AI_GLOBAL_CONCURRENCY: setting(4, 100),
   AI_USER_CONCURRENCY: setting(1, 10),
