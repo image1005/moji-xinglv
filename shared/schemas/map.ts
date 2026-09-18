@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const CoordinateSchema = z.string().max(48).refine((value) => {
+const CoordinateSchema = z.string().max(48).refine((value) => {
   if (!/^-?\d{1,3}(\.\d+)?,-?\d{1,2}(\.\d+)?$/.test(value)) return false
   const [lng, lat] = value.split(',').map(Number)
   return lng !== undefined && lat !== undefined && Math.abs(lng) <= 180 && Math.abs(lat) <= 90

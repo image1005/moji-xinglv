@@ -8,7 +8,7 @@ export function hasCoordinates(spot: Pick<Spot, 'lng' | 'lat'>): spot is Located
 }
 
 /** 直线估算，仅供行程密度参考，不是导航里程。 */
-export function distanceKm(a: LocatedSpot, b: LocatedSpot): number {
+function distanceKm(a: LocatedSpot, b: LocatedSpot): number {
   const rad = Math.PI / 180
   const dLat = (b.lat - a.lat) * rad
   const dLng = (b.lng - a.lng) * rad

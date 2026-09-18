@@ -30,8 +30,9 @@ if (!process.argv.includes('--live')) {
   let close: (() => void) | undefined
   try {
     await import('../server/database/migrate')
-    const { db, sqlite, schema } = await import('../server/utils/db')
-    close = () => sqlite.close()
+    const { db } = await import('../server/utils/db')
+    const schema = await import('../server/database/schema')
+    close = () => db.$client.close()
     const userId = crypto.randomUUID()
     db.insert(schema.user).values({ id: userId, email: `${userId}@example.invalid`, name: '隔离评测用户', createdAt: new Date(), updatedAt: new Date() }).run()
     const { createPlan, getPlanSnapshot } = await import('../server/services/plan')

@@ -78,6 +78,22 @@ beforeEach(() => {
 })
 
 describe('真实 Mastra 工具与 AI SDK v5 离线集成', () => {
+  it.each(['apply_plan_edits', 'patch_plan_json'] as const)('在 %s 等待修订号时取消，恢复读取后不得提交编辑', async (name) => {
+    const controller = new AbortController()
+    let completeRead!: (snapshot: unknown) => void
+    mocks.getPlanSnapshot.mockImplementationOnce(() => new Promise(resolve => { completeRead = resolve }))
+    const tools = createPlanTools({ userId: 'offline-owner', planId, conversationId: 61, assistantMessageId: 101, signal: controller.signal })
+    const execute = tools[name].execute as (input: unknown) => Promise<unknown>
+    const pending = execute(name === 'apply_plan_edits' ? editInput : { planId, patch: { summary: '不应写入' } })
+    const rejected = expect(pending).rejects.toThrow('stopped')
+    await vi.waitFor(() => expect(mocks.getPlanSnapshot).toHaveBeenCalled())
+    controller.abort(new DOMException('stopped', 'AbortError'))
+    completeRead({ plan, row: { revision: 1 }, current: { version: 1 } })
+    await rejected
+    expect(mocks.applyPlanEdits).not.toHaveBeenCalled()
+    expect(mocks.patchPlan).not.toHaveBeenCalled()
+  })
+
   it('执行侧跟踪修订号；冲突后必须读取，连续编辑使用最新修订号', async () => {
     const tools = createPlanTools({ userId: 'offline-owner', planId, conversationId: 61, assistantMessageId: 101, revision: 1 })
     const edit = tools.apply_plan_edits.execute as (input: typeof editInput) => Promise<unknown>

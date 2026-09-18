@@ -66,8 +66,11 @@ export function createPlanTools(ctx: ToolContext) {
     outputSchema: mutationOutput,
     execute: (input) => guard(async () => {
       ensureScope(input.planId)
+      const expected = await expectedRevision()
+      // Awaiting a snapshot yields even with a known revision. Recheck at the write boundary.
+      ctx.signal?.throwIfAborted()
       const result = await applyPlanEdits(ctx.userId, ctx.planId, input.edits, {
-        messageId: ctx.assistantMessageId, expectedVersion: input.expectedVersion, expectedRevision: await expectedRevision(),
+        messageId: ctx.assistantMessageId, expectedVersion: input.expectedVersion, expectedRevision: expected,
       })
       revision = result.revision
       return {
@@ -88,8 +91,10 @@ export function createPlanTools(ctx: ToolContext) {
     outputSchema: mutationOutput,
     execute: (input) => guard(async () => {
       ensureScope(input.planId)
+      const expected = await expectedRevision()
+      ctx.signal?.throwIfAborted()
       const result = await patchPlan(ctx.userId, ctx.planId, input.patch, {
-        source: 'ai', messageId: ctx.assistantMessageId, expectedVersion: input.expectedVersion, expectedRevision: await expectedRevision(), note: input.reason,
+        source: 'ai', messageId: ctx.assistantMessageId, expectedVersion: input.expectedVersion, expectedRevision: expected, note: input.reason,
       })
       revision = result.revision
       return {

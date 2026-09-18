@@ -28,6 +28,8 @@ jobs:
         run: bun install --frozen-lockfile
       - name: 执行代码、类型、测试与 Knip 全量和生产入口检查
         run: bun run check
+      - name: 历史迁移、附件权限与媒体修订隔离验证
+        run: bun run verify:media
       - name: 构建生产产物
         run: bun run build
       - name: 隔离数据库 HTTP 验收
@@ -38,6 +40,8 @@ jobs:
         run: bunx playwright install --with-deps chromium
       - name: 本地模拟 AI 浏览器验收
         run: bun run test:browser
+      - name: JSONL 多模态、搜索、资源与地图完整产品验收
+        run: bun run test:product
       - name: 保存浏览器报告和截图
         if: always()
         uses: actions/upload-artifact@v4
@@ -46,4 +50,5 @@ jobs:
           path: |
             .verification/browser
             .verification/recovery
+            .verification/product
           if-no-files-found: ignore
