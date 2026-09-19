@@ -140,6 +140,7 @@ function showSettings() {
         </div>
       </div>
       <button
+        v-if="!mobile"
         type="button"
         class="ws__collapse ws__tool"
         title="收起侧边栏"
