@@ -1,4 +1,4 @@
-import type { Day, Spot } from '../schemas/plan'
+import type { Spot } from '../schemas/plan'
 
 export type LocatedSpot = Spot & { lng: number; lat: number }
 export function hasCoordinates(spot: Pick<Spot, 'lng' | 'lat'>): spot is LocatedSpot {
@@ -8,7 +8,7 @@ export function hasCoordinates(spot: Pick<Spot, 'lng' | 'lat'>): spot is Located
 }
 
 /** 直线估算，仅供行程密度参考，不是导航里程。 */
-export function distanceKm(a: LocatedSpot, b: LocatedSpot): number {
+function distanceKm(a: LocatedSpot, b: LocatedSpot): number {
   const rad = Math.PI / 180
   const dLat = (b.lat - a.lat) * rad
   const dLng = (b.lng - a.lng) * rad
@@ -54,14 +54,4 @@ export function staticMapUrl(spots: LocatedSpot[], zoomOffset = 0): string {
   // 一日内同页已定位地点的顺序连线，跨页不假装连续导航。
   if (positions.length > 1) params.append('paths', positions.join(';'))
   return `/api/staticmap?${params.toString()}`
-}
-
-export function planMetrics(days: Day[]) {
-  return {
-    days: days.length,
-    cities: new Set(days.map((d) => d.city.trim()).filter(Boolean)).size,
-    stops: days.reduce((n, d) => n + d.spots.length, 0),
-    located: days.reduce((n, d) => n + d.spots.filter(hasCoordinates).length, 0),
-    distanceKm: days.reduce((n, d) => n + routeDistance(d.spots), 0),
-  }
 }

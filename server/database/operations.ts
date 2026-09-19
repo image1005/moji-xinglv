@@ -7,6 +7,7 @@ export const chatRuns = sqliteTable('chat_runs', {
   userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
   requestId: text('request_id').notNull(),
   requestHash: text('request_hash').notNull(),
+  configurationJson: text('configuration_json', { mode: 'json' }),
   planId: integer('plan_id').notNull(),
   conversationId: integer('conversation_id').notNull(),
   assistantMessageId: integer('assistant_message_id'),

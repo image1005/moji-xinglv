@@ -69,20 +69,34 @@
 
 `POST /api/chat`
 
-```json
-{ "conversationId": 1, "planId": 1, "requestId": "req-example-001", "messages": [{ "role": "user", "parts": [{ "type": "text", "text": "请增加一天杭州行程" }] }] }
+请求 `Content-Type: application/x-ndjson`，一行一条记录，以换行结束；当前一次发送一条用户消息。响应同为 `application/x-ndjson; charset=utf-8`。旧的 JSON messages 数组入口已移除，SQLite 旧历史仍兼容。
+
+```jsonl
+{"protocolVersion":1,"type":"message","requestId":"req-example-001","messageId":"user-001","conversationId":1,"planId":1,"configuration":{"model":"deepseek-flash","webSearch":false,"thinking":"standard"},"message":{"id":"user-001","role":"user","parts":[{"type":"text","text":"请增加一天杭州行程"}]}}
 ```
 
+附件 part 为 `{"type":"file","attachmentId":"上传接口返回的UUID"}`，允许只有图片；二进制不进入聊天 JSONL。事件带 protocolVersion/requestId/messageId/seq，类型为 status、chunk、error、terminal。chunk 内复用 SDK text/file/tool parts；搜索来源由工具结果承载，行程预览由真实事务结果承载。详见 [JSONL 契约与边界](JSONL.md)。
+
 - 服务端：登记请求和额度 → 使用数据库可信历史与最新用户消息 → 预建 assistant 消息行 → 构建带当前规划快照与 AGENTS.md 的 Mastra Agent →
-  `@mastra/ai-sdk` `handleChatStream` 流式输出（AI SDK v5 协议），多步工具循环（`maxSteps: 12`）
+  `@mastra/ai-sdk` `handleChatStream` 输出 AI SDK v5 消息流，再由薄适配层封装为应用 JSONL；Mastra 管理多步工具循环（`maxSteps: 12`）
 - 工具集（均校验 `planId` 作用域）：`get_plan`、`apply_plan_edits`（原子操作数组）、`patch_plan_json`（兜底）、`get_panorama`、`search_poi`；
   工具执行侧维护读取修订号；冲突返回 409 后必须重读。`get_plan` 支持 `section=all|overview|metadata|budget|tips|day|foodJournal|checklist`、`dayIndex`、`offset`、`limit`；分段结果带 `hasMore` / `nextOffset`，不能当成完整数组覆盖。
 - 一轮对话只保留一个版本：同一 `assistantMessageId` 且仍是当前版本时原地更新该版本（diff 对父版本重算），否则追加
 - 工具预览随流返回（`tool-*/output.preview`），在规划提交事务中持久化；文本和工具记录在工具完成、周期检查点和收尾时写回。重启后任务标为 `interrupted`，保留已提交结果，不重新执行工具或续传未保存的 token。
-- `requestId` 为可选兼容字段（8–160 位字母、数字、下划线或连字符），当前客户端始终发送。相同用户重复提交同 ID 返回 409，`data` 含已有任务状态，不再次执行。普通丢响应重试复用该 ID；用户明确选择新一轮时生成新 ID，已提交改动仍保留。
+- `requestId` 必填；幂等身份包含用户、规划、会话、规范化消息内容、附件 ID 和本轮实际模型／搜索／思考配置。重复提交同 ID 返回 409，配置或内容不同明确报冲突，不错误复用结果。普通丢响应重试复用 ID；用户明确新一轮才生成新 ID，已提交改动仍保留。
 - `GET /api/chat/runs?conversationId=1` → 最近 20 个授权任务，字段为 `requestId`、`status`、`assistantMessageId`、`planId`、`conversationId`、`steps`、`errorCode`、`startedAt`、`updatedAt`、`finishedAt`。状态为 `queued|running|completed|cancelled|failed|interrupted`。
 - 每轮最多 12 步、服务端总超时 180 秒；输入采用 UTF-8 字节预算，输出 token、用户/全局并发、队列和周期请求额度由 `.env.example` 的 `AI_*` 配置。流建立前输入超预算返回 400；已在流中的工具结果超预算以流错误结束，保留已提交修改。限额/等待超时返回 429 和 `Retry-After`。供应商不提供的 token 用量不推算。
-- 客户端使用 `@ai-sdk/vue` 的 `Chat` + `DefaultChatTransport`；同规划视图切换保持流，切换会话或规划停止。
+- 客户端使用 `@ai-sdk/vue` 的 `Chat` + 扩展 DefaultChatTransport 的 JsonlChatTransport；消息只由 SDK 管理。同规划视图切换保持流，切换会话或规划停止。
+
+### 模型配置、附件与资源
+
+- `GET /api/model-settings` → `{ defaults, capabilities }`；`PUT /api/model-settings` 接收 `{ model, webSearch, thinking }`，校验实际能力并保存当前用户默认值。thinking 为 off/light/standard/deep；每轮配置另存 chat_runs.configurationJson。Tavily 未配置时 webSearch=true 被拒绝。
+- `POST /api/attachments`：multipart/form-data，字段 planId 与 file；返回 `{ id, url, mediaType, filename, size, width, height }`。每张≤5 MiB、8192 px 单边和24M像素，真实解码 JPEG/PNG/WebP 后统一重编码；一轮最多4张。
+- `GET /api/attachments/:id`：验证用户与所属规划，再返回图片正文；`DELETE` 移除未发送附件，已关联消息的附件受引用规则保护。跨用户、跨工作区访问不泄露存在性。清理规则见媒体文档。
+- `GET /api/plans/:id/resources` → `{ revision, resources }`；每个资源以稳定 entityId 关联，包含状态、图片来源／提供方／署名／类型及已确认坐标系和来源。
+- `POST /api/plans/:id/resources` 接收 `{ expectedRevision, entityId? }`，逐步获取实际图片和地点；写回重新检查用户、规划、revision、实体指纹，不增加行程版本。失败保留明确状态供重试。
+- `GET /api/plans/:id/resource-image?entityId=...`：按规划授权后代理已确认图片，检查域名、大小和真实解码，禁止任意 URL 代理。
+- 开启联网才向 Mastra 注册 `search_web`，每轮至多3次、每次最多5条、12秒超时。返回标题、链接、摘要、获取时间与真实提供方 Tavily；外部资料作为不可信参考，不改变工具权限。
 
 ## AGENTS.md 偏好
 
@@ -107,7 +121,7 @@
 
 `GET /api/poi?planId=1&q=景点名&region=城市` → `{ results: [{ name, address, lng, lat }], source: 'current-plan' }`。`planId` 与非空 `q` 必填，`region` 可选；按名称 / 地址检索，最多 20 条。
 
-该接口与 Agent 的 `search_poi` 只检索已授权的当前规划已有且具备坐标的景点，不调用百度在线地点搜索或地理编码；按 `planId` 进行所有权与工作区作用域校验。规划内未知坐标仍为 `null`，不进入地点检索结果，需由用户人工补全；无需地图 key。
+该接口与 Agent 的 `search_poi` 只检索已授权的当前规划已有且具备坐标的景点，保留其本地检索语义，无需地图 key。新的 resources 服务另行调用百度地点搜索／地理编码，按城市、名称和地址消歧；不确认就保持待定位。已确认的资源坐标用于城市地图，不后台覆盖用户行程或生成图片版本。AI 新增地点禁止自行提交猜测坐标。
 
 ## 后台（需要 admin）
 

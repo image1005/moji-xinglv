@@ -87,7 +87,7 @@ async function submit() {
   <main class="login">
     <div class="login__layout">
       <section class="login__story" aria-label="山海行笺">
-        <div class="login__brand"><span class="seal-mark" aria-hidden="true"><span>山</span><span>海</span><span>行</span><span>笺</span></span><div><h1>山海行笺</h1><p>AI 旅行规划</p></div></div>
+        <div class="login__brand"><BrandMark :size="58" decorative /><div><h1>山海行笺</h1><p>AI 旅行规划</p></div></div>
         <div class="login__verse"><p class="eyebrow">心有所向 · 山海可往</p><h2>把远方，<br>写进日常。</h2><p>从一念向往，到一路风景。<br>你的旅行知己，陪你把每一程细细安排。</p><div class="login__signature"><span />行有所思 · 旅有所记</div></div>
         <div class="login__window" aria-hidden="true"><span /><AppIcon name="mountain" :size="100" /></div>
         <p class="login__story-foot">一笺山海，万般自在。</p>

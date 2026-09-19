@@ -8,7 +8,7 @@ const MAX_LENGTH = 400
 
 class ActionableToolError extends Error {}
 
-export function sanitizeToolError(text: string): string {
+function sanitizeToolError(text: string): string {
   let clean = ''
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0

@@ -21,6 +21,7 @@ const editOp = z.strictObject({
 
 /** 工具执行与聊天边界使用同一份入参契约，避免把框架校验结果误当作成功输出。 */
 export const PLAN_TOOL_INPUT_SCHEMAS = {
+  search_web: z.strictObject({ planId, query: z.string().trim().min(1).max(200) }),
   get_plan: z.strictObject({
     planId,
     section: z.enum(['all', 'overview', 'metadata', 'budget', 'tips', 'day', 'foodJournal', 'checklist']).optional(),

@@ -1,12 +1,9 @@
-import { authClient } from '~/utils/auth-client'
-
 export default defineNuxtRouteMiddleware(async (to) => {
-  const { data: session } = await authClient.useSession(useFetch)
-  if (!session.value) {
+  const user = await useCurrentUser().loadMe(true)
+  if (!user) {
     return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
   }
-  const role = (session.value.user as { role?: string | null }).role
-  if (role !== 'admin') {
+  if (user.role !== 'admin') {
     return navigateTo('/')
   }
 })

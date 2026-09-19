@@ -1,4 +1,5 @@
 import type { SessionUser } from '~/utils/api'
+import { SessionUserSchema } from '#shared/schemas/workspace'
 import { setCacheUser } from '~/utils/idb'
 
 const usersByApp = new WeakMap<object, ReturnType<typeof createCurrentUser>>()
@@ -26,7 +27,7 @@ function createCurrentUser() {
       try {
         // SSR 转发当前请求的 Cookie，不能使用未绑定请求的全局 $fetch。
         const result = await requestFetch<{ user: SessionUser }>('/api/me')
-        if (token === request) applyUser(result.user)
+        if (token === request) applyUser(SessionUserSchema.parse(result.user))
       } catch {
         if (token === request) applyUser(null)
       } finally {

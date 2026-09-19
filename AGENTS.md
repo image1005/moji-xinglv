@@ -5,7 +5,7 @@ Nuxt 4 + Bun 全栈项目：AI 旅游行程规划工作台，dsh 式**两栏**�
 
 完整产品规格、数据模型与验收标准见 `docs/PRD.md`（已通过 `opencode.json` 自动加载，动手前先读）。
 
-当前仓库为从零搭建状态：若「目标结构」中的文件尚不存在，说明正在执行初始化任务，按 PRD 落盘并保持本文件全部约束。
+仓库已有业务数据、版本与会话实现；历史文档可能滞后，变更前以实际代码与运行结果确认。渐进模块化期间保留功能连续性，数据库升级仅通过 Drizzle 迁移，验证使用临时数据库。
 
 ## 命令（必须提供并保持的脚本接口）
 
@@ -25,14 +25,14 @@ Nuxt 4 + Bun 全栈项目：AI 旅游行程规划工作台，dsh 式**两栏**�
 - ⚠️ Nuxt 脚本必须经 `bun --bun`（已内置在 package.json）；直接用 Node 跑 `nuxt dev` 会报 `Received protocol 'bun:'`，生产运行用 `bun .output/server/index.mjs`
 - npm scripts 必须跨平台（Windows PowerShell 5.1）；不要用 `rm` / `cp` 等 POSIX 命令，优先 Bun API 或 `node:fs`
 - 初始化时本机 `bun` 不在 PATH；执行命令前先 `bun --version` 验证，缺失则安装（`powershell -c "irm bun.sh/install.ps1 | iex"`）并重开终端
-- 任务完成前必须通过：`bun run lint` + `bun run typecheck` + `bun run test`
+- 任务完成前必须通过 `bun run check`（lint、typecheck、test、Knip全量及生产扫描）；产品交付运行 `bun run check:release`，真实服务调用结果与隔离模拟分开记录。
 
 ## 技术选型（已锁定，勿擅自更换）
 
 - Nuxt 4（`app/` 目录）+ Vue 3 + TypeScript strict；不引入 UI 组件库，手写 SCSS 国风设计令牌
 - DB：`bun:sqlite` + `drizzle-orm/bun-sqlite` + drizzle-kit；**单一写入者** = Drizzle；Mastra 不接 SQLite 存储（避免双写与锁冲突）
 - 鉴权：`better-auth` + Drizzle adapter + admin 插件（`server/utils/auth.ts`，catch-all 挂在 `/api/auth/[...all]`）；`/admin/**` 由 `server/middleware/admin-guard.ts` 守卫 + API `requireAdmin` 双重校验；表结构以 better-auth 为准（`server/database/auth-schema.ts` 由 CLI 生成，勿手改），覆盖 PRD 中 users/sessions 简表设计
-- Agent：Mastra 跑在 Nitro 路由内；聊天流用 `@mastra/ai-sdk` 的 `handleChatStream` + `toAISdkV5Messages`，客户端用 `@ai-sdk/vue`
+- Agent：Nitro路由调用聊天应用服务，Mastra拥有工具编排；`@mastra/ai-sdk` 的 `handleChatStream` 输出SDK流，经薄适配变为应用JSONL。客户端 `@ai-sdk/vue` Chat管理消息与状态；恢复由数据库DTO明确映射成SDK parts。
 - ⚠️ AI SDK 版本对齐：`ai` / `@ai-sdk/vue` 必须与 `@mastra/ai-sdk` 支持的 v5 消息协议一致；不要盲目升到最新 major，升级前先跑通完整对话流
 - ⚠️ SSR 与 zod：`nuxt.config.ts` 的 `vite.ssr.noExternal: ['zod']` 不能删——`shared/` 目录经 Vite 优化后在 SSR 下会丢失 zod 命名导出（报 `z.object` undefined）
 - LLM：OpenAI 兼容接口，环境变量 `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL`
@@ -48,7 +48,7 @@ app/                       # Nuxt 4 前端
   components/              # WorkspaceSidebar（工作区文件夹树）、MainPanel（模式路由）、
                            # ConversationView（对话/版本路线）、PlanWorkspaceView（行程/地图/食记/街景/偏好）、
                            # SettingsView、ChatMessage/PreviewCard/ToolCallCard、国风组件与 AppIcon
-  composables/             # useWorkspace（工作区/会话/消息/版本单例）、useCurrentUser
+  composables/             # useWorkspace 过渡入口（按 Nuxt app/用户隔离）、useCurrentUser
   utils/idb.ts             # IndexedDB 缓存（街景 Blob、plan JSON，TTL + LRU）
   assets/styles/           # 国风设计令牌 SCSS
 server/
@@ -66,7 +66,7 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 
 ## 硬约束（最容易踩的坑）
 
-1. 百度 AK 仅服务端：只允许 `server/services/baidu.ts` 读 `BAIDU_MAP_AK`；只代理 `staticimage/v2`（markers/paths 画路线）与 `panorama/v2`；禁止引入百度 JS API GL、禁止浏览器端 AK（已决策，见 PRD）
+1. 百度 AK 仅服务端：只允许 `server/services/baidu.ts` 读 `BAIDU_MAP_AK`；代理 `staticimage/v2`（markers/paths 画路线）与 `panorama/v2`，按本轮授权增加受控 `place/v2/search` 和 `geocoding/v3`（见 PRD 裁决 10）；禁止引入百度 JS API GL 和浏览器端 AK。未知位置保持待定位，不让模型猜坐标。
 2. 缓存优先：请求百度前必须先查前端 IndexedDB → 后端 `cache` 表 / Nitro storage（`key = hash(api + params)`，校验 `expires_at`）；未命中才请求并写回（内存 + DB）
 3. AI 只产出结构化编辑（工具返回值经 Zod 校验）；服务端校验后合并生成新版本；禁止用 AI 文本整体覆盖 `plan_json`。优先 `apply_plan_edits` 原子操作，`patch_plan_json` 仅兜底，不向 AI 暴露全量覆盖工具。行程 JSON 为严格契约：未知字段必须 400 拒绝并给出改名提示（如 `stay → lodging`），禁止静默丢弃；界面不提供 JSON 源码编辑，全部走可视化表单
 4. 工具作用域：每个 tool 必须接收并校验当前 `plan_id`，禁止跨规划读写

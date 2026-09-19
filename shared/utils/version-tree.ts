@@ -8,7 +8,7 @@ export interface VersionTreeInput {
   parentVersionId: number | null
 }
 
-export interface VersionTreeNode extends VersionTreeInput {
+interface VersionTreeNode extends VersionTreeInput {
   depth: number
   x: number
   y: number

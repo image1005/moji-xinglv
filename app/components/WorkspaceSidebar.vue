@@ -131,9 +131,7 @@ function showSettings() {
     @keydown="onDrawerKeydown"
   >
     <div class="ws__brand">
-      <span class="seal-mark" aria-hidden="true">
-        <span>山</span><span>海</span><span>行</span><span>笺</span>
-      </span>
+      <BrandMark :size="43" decorative />
       <div class="ws__brand-info">
         <h1>山海行笺</h1>
         <div class="ws__brand-status">
@@ -142,6 +140,7 @@ function showSettings() {
         </div>
       </div>
       <button
+        v-if="!mobile"
         type="button"
         class="ws__collapse ws__tool"
         title="收起侧边栏"
