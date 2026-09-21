@@ -40,10 +40,14 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
   assert(response.ok(), `${path}: ${response.status()} ${(await response.text()).slice(0, 400)}`)
   return response.json() as Promise<T>
 }
-async function openChat() {
+async function expandedFolder() {
   const folder = page!.locator('.folder').filter({ has: page!.locator('.folder__title', { hasText: '图文产品验收' }) })
   await expect(folder).toBeVisible()
   if (await folder.locator('.folder__toggle').getAttribute('aria-expanded') !== 'true') await folder.locator('.folder__toggle').click()
+  return folder
+}
+async function openChat() {
+  const folder = await expandedFolder()
   await folder.locator('.conversation-row .row').first().click()
   await page!.getByRole('tab', { name: '旅途对话', exact: true }).click()
   await expect(page!.locator('#travel-message')).toBeVisible()
@@ -106,7 +110,7 @@ try {
   })
   await step('景点食记图片和城市地图逐步补齐，不改变行程版本', async () => {
     const before = await api<PlanDetail>(`/api/plans/${planId}`)
-    const folder = page!.locator('.folder').filter({ has: page!.locator('.folder__title', { hasText: '图文产品验收' }) })
+    const folder = await expandedFolder()
     await folder.locator('.row--plan').click()
     await page!.getByRole('tab', { name: '行程总览', exact: true }).click()
     await expect.poll(async () => (await api<PlanResources>(`/api/plans/${planId}/resources`)).resources.filter(value => value.image && value.location).length, { timeout: 45000 }).toBeGreaterThanOrEqual(3)
@@ -123,7 +127,7 @@ try {
     await firstImage.getByRole('button', { name: '重试', exact: true }).click()
     await expect(firstImage.locator('img')).toBeVisible()
     await page!.reload()
-    await folder.locator('.row--plan').click()
+    await (await expandedFolder()).locator('.row--plan').click()
     await page!.getByRole('tab', { name: '行程总览', exact: true }).click()
     await page!.getByLabel('地图每日路线').selectOption('0')
     const map = page!.getByRole('region', { name: '目标城市地图' })

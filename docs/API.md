@@ -90,13 +90,13 @@
 
 ### 模型配置、附件与资源
 
-- `GET /api/model-settings` → `{ defaults, capabilities }`；`PUT /api/model-settings` 接收 `{ model, webSearch, thinking }`，校验实际能力并保存当前用户默认值。thinking 为 off/light/standard/deep；每轮配置另存 chat_runs.configurationJson。Tavily 未配置时 webSearch=true 被拒绝。
+- `GET /api/model-settings` → `{ defaults, capabilities }`；`PUT /api/model-settings` 接收 `{ model, webSearch, thinking, searchProvider? }`，校验实际能力并保存当前用户默认值。thinking 为 off/light/standard/deep；searchProvider 由服务端重算，开启搜索时保存到每轮 chat_runs.configurationJson。官方 DeepSeek 或 Tavily 可用时允许联网。
 - `POST /api/attachments`：multipart/form-data，字段 planId 与 file；返回 `{ id, url, mediaType, filename, size, width, height }`。每张≤5 MiB、8192 px 单边和24M像素，真实解码 JPEG/PNG/WebP 后统一重编码；一轮最多4张。
 - `GET /api/attachments/:id`：验证用户与所属规划，再返回图片正文；`DELETE` 移除未发送附件，已关联消息的附件受引用规则保护。跨用户、跨工作区访问不泄露存在性。清理规则见媒体文档。
 - `GET /api/plans/:id/resources` → `{ revision, resources }`；每个资源以稳定 entityId 关联，包含状态、图片来源／提供方／署名／类型及已确认坐标系和来源。
 - `POST /api/plans/:id/resources` 接收 `{ expectedRevision, entityId? }`，逐步获取实际图片和地点；写回重新检查用户、规划、revision、实体指纹，不增加行程版本。失败保留明确状态供重试。
 - `GET /api/plans/:id/resource-image?entityId=...`：按规划授权后代理已确认图片，检查域名、大小和真实解码，禁止任意 URL 代理。
-- 开启联网才向 Mastra 注册 `search_web`，每轮至多3次、每次最多5条、12秒超时。返回标题、链接、摘要、获取时间与真实提供方 Tavily；外部资料作为不可信参考，不改变工具权限。
+- 开启联网才向 Mastra 注册 `search_web`，每轮至多3次、每次最多5条、12秒超时。返回标题、链接、摘要、获取时间与真实提供方 DeepSeek/Tavily；未提供摘要时为空串并在界面说明；外部资料作为不可信参考，不改变工具权限。
 
 ## AGENTS.md 偏好
 

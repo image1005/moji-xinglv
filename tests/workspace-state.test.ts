@@ -394,6 +394,9 @@ describe('渐进资源与隔离', () => {
     expect(maximum).toBeLessThanOrEqual(2)
     expect(workspace.planResources.records.value[1]!.resources[0]!.status).toBe('failed')
     expect(workspace.planResources.records.value[1]!.resources[12]!.status).toBe('ready')
+    await workspace.planResources.enrich(1, 4)
+    expect(requested).toHaveLength(16)
+    expect(requested.at(-1)).toBe('spot:0')
   })
   it('退出后迟到的资源结果不能填充另一用户状态', async () => {
     const workspace = useWorkspace()
@@ -404,5 +407,19 @@ describe('渐进资源与隔离', () => {
     response.resolve(resourcePage(1))
     await pending
     expect(workspace.planResources.records.value).toEqual({})
+  })
+
+  it('HTTP 失败后手动继续会重试已经尝试过的 pending 资源', async () => {
+    const workspace = useWorkspace()
+    const page = resourcePage(1)
+    workspace.planResources.records.value[1] = page
+    const fetcher = vi.fn().mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ ...page, resources: [{ ...page.resources[0], status: 'ready' }] })
+    vi.stubGlobal('$fetch', fetcher)
+    await workspace.planResources.enrich(1, 4)
+    expect(workspace.planResources.failures.value[1]).toBeTruthy()
+    await workspace.planResources.enrich(1, 4)
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    expect(workspace.planResources.records.value[1]!.resources[0]!.status).toBe('ready')
+    expect(workspace.planResources.failures.value[1]).toBe('')
   })
 })

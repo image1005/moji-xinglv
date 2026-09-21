@@ -41,7 +41,7 @@
 **图文旅行规划**
 
 - 输入文字，或选择、拖拽、粘贴图片；上传支持预览、移除、进度及失败重试，纯图片也可发送，刷新后恢复附件和后续追问。
-- 联网开关与关闭／轻量／标准／深度思考独立配置，按模型真实能力禁用不支持项，默认设置和每轮快照持久化；联网使用独立 Tavily 工具，明确展示来源。
+- 联网开关与关闭／轻量／标准／深度思考独立配置，按模型真实能力禁用不支持项，默认设置和每轮快照持久化；联网支持 DeepSeek 官方搜索或独立 Tavily 工具，明确展示来源。
 - DeepSeek 官方模型支持情况以官方文档与真实请求验证为依据，兼容网关采用保守能力配置，不静默丢弃图片或伪装思考深度。
 - 行程和预览展示摘要、每日安排、景点图、美食图与多城市地图。图片来自实际获取并解码的 Wikimedia 资源，附来源与署名；地图使用可信 BD09 坐标，未知地点保留待定位。
 - 应用聊天收发为版本化 JSONL，文件独立上传；AI SDK 管理聊天消息与状态，Mastra 负责工具编排。
@@ -171,7 +171,8 @@ bun dev
 | `DATABASE_URL` | SQLite 文件路径，形如 `file:./data/app.db` |
 | `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | DeepSeek 官方示例：`https://api.deepseek.com/v1` + `deepseek-flash`；旧 chat 别名按已验证实际模型规范化 |
 | `AI_PROVIDER` / `AI_SUPPORTS_VISION` | 自定义网关显式选择 DeepSeek provider；其他网关视觉须经部署者验证后开启 |
-| `TAVILY_API_KEY` | 独立 Tavily 搜索，缺失时联网开关禁用；不是 DeepSeek 原生搜索 |
+| `AI_SEARCH_PROVIDER` | `auto`（默认）：优先 Tavily，否则使用官方 DeepSeek 密钥搜索；可显式指定 `deepseek`、`tavily` 或 `off` |
+| `TAVILY_API_KEY` | 可选的独立 Tavily 搜索；使用官方 DeepSeek 搜索时无需此配置 |
 | `AI_INPUT_MAX_BYTES` / `AI_OUTPUT_MAX_TOKENS` | 默认 96000 字节输入预算 / 4096 输出 token；输入预算包含规则、工具契约和工具结果 |
 | `AI_GLOBAL_CONCURRENCY` / `AI_USER_CONCURRENCY` | 默认同时生成 4 / 1 个任务 |
 | `AI_QUEUE_LIMIT` / `AI_QUEUE_WAIT_MS` | 默认队列 8 个、等待上限 10000ms |

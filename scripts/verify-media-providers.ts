@@ -24,12 +24,13 @@ try {
     globalThis.fetch = originalFetch
     migrate(db, { migrationsFolder: resolve('server/database/migrations') })
     const { acquireWikimediaImage } = await import('../server/services/wikimedia')
-    for (const entity of [{ entityId: 'spot:probe', entityType: 'spot' as const, name: '西湖', city: '杭州', address: '', fingerprint: 'probe' }, { entityId: 'food:probe', entityType: 'food' as const, name: '东坡肉', city: '杭州', address: '', fingerprint: 'probe' }]) {
+    for (const entity of [{ entityId: 'spot:probe', entityType: 'spot' as const, name: '苏州拙政园', city: '苏州', address: '', fingerprint: 'probe' }, { entityId: 'food:probe', entityType: 'food' as const, name: '东坡肉', city: '杭州', address: '', fingerprint: 'probe' }]) {
       const started = Date.now()
       try {
         const result = await acquireWikimediaImage(entity)
+        if (!result) process.exitCode = 1
         console.log(JSON.stringify({ mode: 'real-wikimedia', entity: entity.name, status: result ? 'image-fetched-and-decoded' : 'no-confirmed-image', source: result?.image.sourceUrl, attribution: result?.image.attribution, durationMs: Date.now() - started }))
-      } catch (error) { console.log(JSON.stringify({ mode: 'real-wikimedia', entity: entity.name, status: 'unreachable-or-provider-error', errorType: error instanceof Error ? error.name : 'Error', contractIssues: error && typeof error === 'object' && 'issues' in error ? error.issues : undefined, durationMs: Date.now() - started })) }
+      } catch (error) { process.exitCode = 1; console.log(JSON.stringify({ mode: 'real-wikimedia', entity: entity.name, status: 'unreachable-or-provider-error', errorType: error instanceof Error ? error.name : 'Error', contractIssues: error && typeof error === 'object' && 'issues' in error ? error.issues : undefined, durationMs: Date.now() - started })) }
     }
   } else {
   // Reproduce upgrade from the last released migration with existing user/plan data.
@@ -140,7 +141,7 @@ try {
   assert.throws(() => resolveAttachments('owner', oldPlan.id, [upload.id]), /附件不存在/)
   const config = { model: 'deepseek-flash', webSearch: true, thinking: 'deep' as const }
   saveModelSettings('owner', config)
-  assert.deepEqual(resolveModelConfiguration('owner'), config)
+  assert.deepEqual(resolveModelConfiguration('owner'), { ...config, searchProvider: 'Tavily' })
   process.env.AI_PROVIDER = 'compatible'; process.env.AI_MODEL = 'replacement'
   assert.equal(getModelSettings('owner').defaults.model, 'replacement')
   const sources = await searchWeb('杭州')

@@ -43,7 +43,7 @@ ${planContext(ctx.plan)}
 ${ctx.agentsMd}
 
 ## 工作规则（必须遵守）
-本轮联网：${ctx.configuration?.webSearch ? '已启用，search_web 使用独立 Tavily 提供方；只引用实际返回的来源。' : '关闭，不得声称已联网或编造来源。'}
+本轮联网：${ctx.configuration?.webSearch ? `已启用，search_web 的提供方为 ${ctx.configuration.searchProvider ?? '服务端配置的搜索服务'}；只引用实际返回的来源，空摘要表示提供方未返回明文内容。` : '关闭，不得声称已联网或编造来源。'}
 图片识别不确定时明确说明，不能将推测当事实；图片识别引起的行程修改仍通过结构化工具提交。图片链接由资源服务补齐，禁止猜测图片网址或将生成图片当作实景。
 1. 修改行程只用工具：优先 apply_plan_edits 提交原子操作数组（每项 target: plan|day|spot|food|checklist，action: add|update|remove|move|status|toggle，配合 day/index/to/id/text/status/value；value 是该对象的部分字段，数组整体替换、null 删除）。ops 表达不了的任意嵌套改动才用 patch_plan_json 兜底。
 2. 工具直接在事务内作用于最新内容，不必先读取；只有返回版本冲突（409）时才用 get_plan 重读后重试。字段名必须与契约完全一致——行程顶层：title/summary/cover/days/tips/budget/tags/foodJournal/checklist；days 项：date/city/spots/transport/lodging/meals；景点：name/lng/lat/time/notes/imageUrl/panorama/address/category/durationMinutes(分钟数)/cost；食记：id/name/restaurant/city/address/date/meal/status/cost/rating(0–5 数字)/notes/tags；清单：id/text/done。不要自造字段（住宿是 lodging 不是 stay，停留时长是 durationMinutes 不是 duration），未知字段会被服务端拒绝。
@@ -60,6 +60,8 @@ ${ctx.agentsMd}
 - 长规划的资料、预算明细、提示可用 get_plan 的 section=metadata/budget/tips 读取；分页返回 nextOffset 与 hasMore，继续读取时以 nextOffset 为准，不能把部分结果当成全部。
 - 工具执行侧维护已读取的数据修订号；冲突后必须重读。长规划仅注入概要，修改旧条目前用 get_plan({"planId":${ctx.planId},"section":"day","dayIndex":0,"offset":0,"limit":10}) 读取相关完整条目；食记和清单可按 section=foodJournal/checklist 分页读取。概要不能用于替换完整数组。
 - 每次调用都必须提交完整参数，不能调用空对象 {}。读取示例：get_plan({"planId":${ctx.planId}})。
+- 长行程分批提交：每次最多安排两天的完整景点，再继续后续日期和食记；避免一次输出整趟行程导致工具 JSON 截断。同轮分批仍合并为一个版本，最终总结前确认所有批次成功。
+- 景点 category 只能是 sight（景点）、food（餐饮）、stay（住宿）、transport（交通）；不确定时省略，默认 sight。不要填 attraction、culture 或中文类别。景点/食记 cost 必须是数字。
 - 新增日程：{"planId":${ctx.planId},"edits":[{"target":"day","action":"add","value":{"city":"杭州","meals":["午餐建议","晚餐建议"]}}]}。meals 必须是字符串数组，不能是一段字符串。
 - 新增食记：{"planId":${ctx.planId},"edits":[{"target":"food","action":"add","value":{"name":"待尝小吃","meal":"snack","status":"wishlist","rating":0}}]}。meal 仅 breakfast/lunch/dinner/snack；不要填写中文或 lunch/dinner 等组合值。
 - 新增清单：{"planId":${ctx.planId},"edits":[{"target":"checklist","action":"add","text":"核实预约要求"}]}。text 与 target/action 同级，不要写进 value。

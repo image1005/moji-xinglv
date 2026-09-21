@@ -1,5 +1,26 @@
 # 山海行笺：实际验证记录
 
+## 2026-09-21 联网、图片与落笔编排修复
+
+起点 `codex/travel-delivery/e9a982f`，干净工作区。故障证据、修复和使用方式见 [SEARCH_PLANNING_FIX](SEARCH_PLANNING_FIX.md)。无新增依赖或迁移，.env及真实业务数据未改写。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `bun run check` | lint、Nuxt与脚本typecheck、33文件261测试、Knip全量及生产扫描通过 |
+| `bun run verify:media` | 20类隔离协议、迁移、权限与版本断言通过 |
+| `bun run build` | 成功，42.6 MB / 14.1 MB gzip；保留既有上游警告 |
+| `bun run test:integration` / `test:recovery` | 11项HTTP集成、5阶段强制中断与恢复通过 |
+| `bun run test:browser` | 10阶段工作区、草稿、冲突、版本、移动视口及换号隔离通过，无UI异常 |
+| `bun run test:product` | 6阶段通过：上传重试/纯图/搜索深度、景点美食图/地图/图片503重试、编辑保存/恢复/带图追问/关闭搜索、取消/刷新、跨用户跨工作区拒绝 |
+| `bun run verify:planning --real --search` | 实际官方DeepSeek搜索10条来源；light配置，1天/4景点/1食记，一轮仅v2；工具错误0，finishReason=stop。临时数据库 |
+| `bun run verify:media --real` | 苏州拙政园、东坡肉均真实下载并解码，保留署名许可。临时数据库 |
+
+首次 `check:release` 在最后的 `test:product` 失败：旧脚本假定工作区一直展开，实际刷新/列表更新后已折叠，点击入口被导航遮挡。按已有 `test:browser` 的正常用户交互，先展开再点击，未使用 force click、跳过断言或调整产品导航。修复脚本后单独重跑 `test:product` 6阶段全部通过，再次 lint 与脚本typecheck通过；此前已经通过的构建和业务检查未重复执行。
+
+本机脱敏日志：`.verification/search-fix-release.log`（含上述首次脚本失败）、`.verification/search-fix-product.log`（最终成功）、`.verification/search-fix-live.log`（真实搜索/模型/事务）。浏览器报告：`.verification/browser/2026-09-21T07-21-34-630Z/report.json`；恢复报告：`.verification/recovery/2026-09-21T07-21-31-830Z/report.json`；最终产品报告：`.verification/product/2026-09-21T07-26-40-537Z/report.json`。
+
+浏览器供应商仍是显式隔离夹具；真实搜索和图片另外实际调用验证，不能把夹具地图当成真实百度定位。百度/Tavily凭据仍缺失，真实百度地图/定位及Tavily接口尚未联调。历史空参数调用没有原始供应商终止原因，未将其猜测为已证实的截断故障。
+
 ## 2026-09-18 架构与图文产品交付
 
 目录 `E:\hbws\moji-xinglv-new\moji-xinglv-main`，实施分支 `codex/travel-delivery`。逐项产品核对和环境边界见 [DELIVERY](DELIVERY.md)，原始清理前结果见 [ARCHITECTURE_BASELINE](ARCHITECTURE_BASELINE.md)。所有 SQLite 验收均使用独立临时数据库，未迁移真实业务库。用户原有鉴权、侧栏和浏览器测试修改完整保留。

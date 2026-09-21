@@ -14,6 +14,7 @@ describe('实际供应商配置', () => {
   })
   it('禁用缺少配置的搜索，不接受任意模型', () => {
     vi.stubEnv('AI_MODEL', 'deepseek-flash'); vi.stubEnv('AI_PROVIDER', 'deepseek'); vi.stubEnv('TAVILY_API_KEY', '')
+    vi.stubEnv('AI_API_KEY', '')
     expect(() => validateModelConfiguration({ model: 'deepseek-flash', webSearch: true, thinking: 'off' })).toThrow('TAVILY_API_KEY')
     expect(() => validateModelConfiguration({ model: 'arbitrary-model', webSearch: false, thinking: 'off' })).toThrow('未在服务端启用')
   })

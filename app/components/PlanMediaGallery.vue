@@ -10,7 +10,7 @@ const active = computed(() => planResources.active.value[props.planId] ?? [])
 const failure = computed(() => planResources.failures.value[props.planId])
 const pending = computed(() => resources.value.some(item => item.status === 'pending'))
 const samePlan = computed(() => currentPlan.value?.id === props.planId && currentPlan.value.revision === props.revision)
-watch(() => [props.planId, props.revision], () => { if (import.meta.client && samePlan.value) void planResources.load(props.planId, props.revision) }, { immediate: true })
+watch(() => [props.planId, props.revision, samePlan.value], () => { if (import.meta.client && samePlan.value) void planResources.load(props.planId, props.revision) }, { immediate: true })
 onMounted(() => { if (samePlan.value) void planResources.load(props.planId, props.revision) })
 function retry(entityId?: string) { if (samePlan.value) void planResources.enrich(props.planId, props.revision, entityId) }
 </script>

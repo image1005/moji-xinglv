@@ -33,17 +33,29 @@ export async function getResourceImageBytes(originUrl: string, cacheKey: string)
 }
 
 /** Require an exact encyclopedia identity and city evidence. Search ranking alone never proves a photo match. */
-export async function acquireWikimediaImage(entity: PlanEntity): Promise<AcquiredImage | null> {
-  const cacheId = await hashKey('wikimedia-identity-v1', { name: entity.name, city: entity.city, type: entity.entityType })
+export async function acquireWikimediaImage(entity: PlanEntity, retryMissing = false): Promise<AcquiredImage | null> {
+  const cacheId = await hashKey('wikimedia-identity-v2', { name: entity.name, city: entity.city, type: entity.entityType })
   const cached = await getCachedJson<AcquiredImage | { missing: true }>(cacheId)
-  if (cached && 'missing' in cached) return null
-  if (cached) { await getResourceImageBytes(cached.originUrl, cached.cacheKey); return cached }
-  const query = new URL('https://zh.wikipedia.org/w/api.php')
-  query.search = new URLSearchParams({ action: 'query', format: 'json', titles: entity.name, redirects: '1', prop: 'pageimages|extracts|pageprops', piprop: 'name', exintro: '1', explaintext: '1', exchars: '1500' }).toString()
-  const pages = PagesSchema.parse(await providerJson(query, { headers })).query?.pages ?? {}
-  // `titles` is an exact page request; MediaWiki handles canonical redirects and simplified/traditional aliases.
-  const page = Object.values(pages).find(value => !Object.hasOwn(value.pageprops ?? {}, 'disambiguation')
-    && (entity.entityType === 'food' || entity.entityType === 'city' || Boolean(entity.city && normalized(value.extract ?? '').includes(normalized(entity.city).replace(/市$/, '')))))
+  if (cached && 'missing' in cached && !retryMissing) return null
+  if (cached && !('missing' in cached)) { await getResourceImageBytes(cached.originUrl, cached.cacheKey); return cached }
+  const name = entity.name.normalize('NFKC').trim()
+  const city = entity.city.normalize('NFKC').trim().replace(/市$/, '')
+  // Remove only this entity's known city prefix; retain exact title + city evidence checks.
+  const candidates = [name]
+  if (city && name.startsWith(city)) {
+    const localName = name.slice(city.length).replace(/^市/, '').trim()
+    if (localName) candidates.push(localName)
+  }
+  let page: z.infer<typeof WikiPageSchema> | undefined
+  for (const title of [...new Set(candidates)]) {
+    const query = new URL('https://zh.wikipedia.org/w/api.php')
+    query.search = new URLSearchParams({ action: 'query', format: 'json', titles: title, redirects: '1', converttitles: '1', prop: 'pageimages|extracts|pageprops', piprop: 'name', exintro: '1', explaintext: '1', exchars: '1500' }).toString()
+    const pages = PagesSchema.parse(await providerJson(query, { headers })).query?.pages ?? {}
+    // `titles` is an exact page request; MediaWiki handles canonical redirects and simplified/traditional aliases.
+    page = Object.values(pages).find(value => value.pageimage && !Object.hasOwn(value.pageprops ?? {}, 'disambiguation')
+      && (entity.entityType === 'food' || entity.entityType === 'city' || Boolean(entity.city && normalized(value.extract ?? '').includes(normalized(entity.city).replace(/市$/, '')))))
+    if (page) break
+  }
   if (!page?.pageimage) { await setCachedJson(cacheId, { missing: true }, 3600); return null }
   const commons = new URL('https://commons.wikimedia.org/w/api.php')
   commons.search = new URLSearchParams({ action: 'query', format: 'json', titles: `File:${page.pageimage}`, prop: 'imageinfo', iiprop: 'url|extmetadata', iiurlwidth: '900' }).toString()

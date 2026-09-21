@@ -12,17 +12,19 @@ export function createPlanResources() {
   const attempted = new Map<string, Set<string>>()
   let generation = 0
 
-  async function enrich(planId: number, revision: number, entityId?: string) {
+  async function enrich(planId: number, revision: number, entityId?: string, retry = true) {
     const current = records.value[planId]
     if (!current || current.revision !== revision || batches.has(planId)) return
     batches.add(planId)
     const epoch = generation
     const attemptKey = `${planId}:${revision}`
     const tried = attempted.get(attemptKey) ?? new Set<string>()
+    if (retry && !entityId) tried.clear()
     attempted.set(attemptKey, tried)
-    const entries = entityId ? current.resources.filter(item => item.entityId === entityId) : current.resources.filter(item => item.status === 'pending' && !tried.has(item.entityId)).slice(0, 12)
+    const entries = entityId ? current.resources.filter(item => item.entityId === entityId) : current.resources.filter(item => (item.status === 'pending' || retry && item.status === 'failed') && !tried.has(item.entityId)).slice(0, 12)
     const queue = entries.filter(item => !active.value[planId]?.includes(item.entityId))
     let failed = false
+    failures.value[planId] = ''
     const worker = async () => {
       while (queue.length && epoch === generation && records.value[planId]?.revision === revision) {
         const entry = queue.shift()!
@@ -49,7 +51,7 @@ export function createPlanResources() {
       if (epoch === generation) {
         batches.delete(planId)
         const latest = records.value[planId]
-        if (latest && (latest.revision !== revision || !failed && latest.resources.some(item => item.status === 'pending' && !tried.has(item.entityId)))) await enrich(planId, latest.revision)
+        if (latest && (latest.revision !== revision || !failed && latest.resources.some(item => item.status === 'pending' && !tried.has(item.entityId)))) await enrich(planId, latest.revision, undefined, false)
       }
     }
   }
@@ -65,7 +67,7 @@ export function createPlanResources() {
         if (epoch !== generation || result.revision !== revision) return
         records.value[planId] = result
         failures.value[planId] = ''
-        void enrich(planId, revision)
+        void enrich(planId, revision, undefined, force)
       } catch (error) { if (epoch === generation) failures.value[planId] = apiErrorMessage(error, '图片与地点资料暂未取得') }
       finally { if (epoch === generation) fetching.delete(planId) }
     })()

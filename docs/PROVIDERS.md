@@ -1,6 +1,6 @@
 # 模型、搜索与真实能力记录
 
-更新：2026-09-18。供应商功能会变化；此文区分本次实测、官方文档与隔离模拟。
+更新：2026-09-21。供应商功能会变化；此文区分本次实测、官方文档与隔离模拟。
 
 ## 接入与契约
 
@@ -19,9 +19,11 @@
 
 ## 搜索
 
-模型通过 Mastra `search_web` 调用独立 [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search)。需 `TAVILY_API_KEY`。没有凭据时界面禁用联网，服务端也拒绝开启。关闭时不注册该工具；执行层再次校验本轮开关、用户和规划作用域。
+模型通过 Mastra `search_web` 调用服务端选择的提供方。`AI_SEARCH_PROVIDER=auto` 默认优先使用已配置的 [Tavily Search](https://docs.tavily.com/documentation/api-reference/endpoint/search)，否则使用官方 DeepSeek 密钥。可指定 `deepseek`、`tavily` 或 `off`。只有均不可用或显式关闭时才禁用开关。第三方兼容网关的密钥不会发送到 DeepSeek 官方地址。关闭联网时不注册该工具；执行层再次校验本轮开关、用户和规划作用域。
 
-每轮最多 3 次，每次 basic 搜索最多 5 条，12 秒总超时、1 MB 响应上限。返回标题、URL、摘要、取得时间和 `provider=Tavily`，不请求模型生成的 answer。搜索结果作为不可信外部资料，不改变工具权限；工具失败不能显示假成功或假来源。现有聊天并发与周期额度继续限制生成。
+DeepSeek 的 [Anthropic 兼容接口官方说明](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/) 明确支持联网搜索。本项目调用 `/anthropic/v1/messages`，模型 `deepseek-flash`，工具类型 `web_search_20250305`，`max_uses=1`，关闭思考，最多384输出tokens。2026-09-21 实际调用返回 HTTP200 和 `web_search_tool_result`，验证可用。Responses 的 web_search 仍被忽略，不能混淆这两条接口。
+
+每轮最多3次应用搜索，每次最多5来源、12秒总超时、1 MB响应上限。Tavily 使用 basic 搜索；DeepSeek 只接收实际工具结果的标题和 URL，摘要从 snippet 或同 URL 引用取得；未提供明文摘要时明确显示缺失，不解密 encrypted_content，也不把模型正文中的链接当作搜索证据。没有真实结果时返回错误。来源包含获取时间和实际提供方。规范化后的 searchProvider 进入本轮配置快照和幂等哈希，关闭联网则移除此字段。搜索不改变工具权限；官方搜索会产生额外模型用量。
 
 ## 真实探针结果
 
@@ -42,7 +44,7 @@
 
 环境的受限沙箱首次阻断网络，批准网络后上述请求成功。没有输出密钥、用户内容或模型思考正文。`--extended` 仅补测 low/max；`--roundtrip` 仅补测两轮 auto 工具。每次真实重跑会产生新的费用。
 
-本机没有 Tavily/百度凭据，二者仅完成真实协议结构的隔离模拟，尚未真实联调。所需配置：`TAVILY_API_KEY`、具有地点检索/地理编码/静态图/全景权限的 `BAIDU_MAP_AK`。百度 AK 仍仅由 `server/services/baidu.ts` 在生产代码读取。
+9月18日的 Tavily/百度联调仍未完成；9月21日已使用现有官方 DeepSeek 密钥完成真实搜索，无需额外 Tavily 配置。百度仍需具有地点检索/地理编码/静态图/全景权限的 `BAIDU_MAP_AK`。百度 AK 仍仅由 `server/services/baidu.ts` 在生产代码读取。
 
 供应商直连探针不替代框架链路验证。额外的隔离测试已通过真实 `createTravelMastra → handleChatStream → AI SDK → 本地模型 → 真实编辑工具 → 后续模型请求` 的纯图两轮流程；确认每轮有 inline 图像和 max 参数。该测试发现 Bun 1.4.2 对 URL 的 structuredClone 抛异常，现只复制可变 JSON 工具结果，图片 URL 与二进制保留原生类型并独立计量。
 

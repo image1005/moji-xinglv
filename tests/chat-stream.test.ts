@@ -350,6 +350,8 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     expect(part?.errorText).toContain('lodging')
     expect(part?.errorText).not.toContain('[actionable]')
     expect(String((persisted().toolCalls?.[0] as { error?: string } | undefined)?.error)).toContain('lodging')
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'failed', 'generation_failed')
+    expect(forwarded.some(chunk => chunk.type === 'error')).toBe(true)
   })
 
   it('handler 的适配层回调保留自有业务异常，避免先被替换成通用错误', async () => {
@@ -441,5 +443,23 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     expect(persisted().previewJson).toBeUndefined()
     expect(persisted().planVersionId).toBeUndefined()
     expect(persisted().toolCalls).toEqual([{ id: 'known-call', name: 'patch_plan_json', input: input.input, output }])
+  })
+
+  it('修正失败批次并成功保存后，可以正常结束', async () => {
+    const output = { ok: true, version: 2, versionId: 202, preview: { ...preview, title: '修复后的预览' } }
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([
+      input, { type: 'tool-output-error', toolCallId: 'known-call', errorText: '[actionable] 请修正类别' },
+      { ...input, toolCallId: 'retry' }, { type: 'tool-output-available', toolCallId: 'retry', output },
+    ]))
+    await drain(await (await handler())({}))
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'completed', undefined)
+  })
+
+  it.each(['length', 'tool-calls'])('上游 %s 终止不可标记为完成', async (finishReason) => {
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([{ type: 'finish', finishReason }]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.some(chunk => chunk.type === 'error')).toBe(true)
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'failed', 'generation_failed')
+    expect(persisted().content).toContain('上限')
   })
 })

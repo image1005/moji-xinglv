@@ -165,7 +165,16 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
           if (finalization) return
           if (done) { if (!finished) { failed = true; failureMessage = '上游连接提前结束；已保存内容可以恢复。' }; await finalize(); controller.close(); return }
           const part = value as unknown as Record<string, unknown>
-          if (part.type === 'finish') finished = true
+          if (part.type === 'finish') {
+            finished = true
+            const lastMutation = toolCalls.findLast(call => typeof call.name === 'string' && MUTATION_TOOLS.has(call.name))
+            if (part.finishReason === 'length' || part.finishReason === 'tool-calls' || lastMutation?.error) {
+              failed = true
+              failureMessage = part.finishReason === 'length' ? '本轮输出达到长度上限，行程尚未全部完成。已保存版本会保留，请按天分批继续或降低思考深度后重试。'
+                : lastMutation?.error ? `行程编排未完成：${lastMutation.error} 已保存版本会保留。` : '本轮达到工具步骤上限，已保存部分会保留，请继续完成剩余行程。'
+              controller.enqueue({ type: 'error', errorText: failureMessage })
+            }
+          }
           if (part.type === 'text-delta' && typeof part.delta === 'string') {
             text += part.delta
             if (text.length > 100000) { failed = true; run.abort(); return }

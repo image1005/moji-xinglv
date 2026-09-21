@@ -72,7 +72,7 @@ server/providers/models.ts 按官方能力和实际探针建立模型配置。�
 
 DeepSeek 支持的四档对应关闭 thinking，以及启用 thinking 后的 low／high／max；不支持的档位前后端都拒绝。兼容网关必须显式配置并验证，不能仅凭模型名称推断视觉能力。每个部署仍应根据 [验证记录](VERIFICATION.md) 核实所选模型与服务。
 
-联网是独立 Tavily 搜索工具。DeepSeek 的兼容接口不会因传 web_search 就被当作原生搜索；UI 和来源明确标注实际提供方。关闭联网不注册／执行搜索路径；开启后由模型按需调用，限制次数、超时与内容规模。来源作为外部资料处理，不改变系统规则或工具权限。
+联网通过 Mastra search_web 调用 DeepSeek 官方 Anthropic 搜索或独立 Tavily 工具，配置与实际联调证据见 PROVIDERS.md。DeepSeek Responses 的 web_search 仍不支持。UI 和来源明确标注实际提供方；关闭联网不注册／执行搜索路径。开启后由模型按需调用，限制次数、超时与内容规模。来源作为外部资料处理，不改变系统规则或工具权限。
 
 供应商密钥只在服务端读取。百度 AK 保持仅由 server/services/baidu.ts 访问；前端通过静态图、街景和资源代理使用服务。完整变量见 .env.example 与开发指南。
 

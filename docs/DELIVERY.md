@@ -1,5 +1,7 @@
 # 2026-09-18 渐进式架构与图文产品交付
 
+2026-09-21 补充修复：[联网、图片与落笔编排修复记录](SEARCH_PLANNING_FIX.md)。下表保留9月18日交付时的验证边界；当前已增加并实测 DeepSeek 官方 Anthropic 搜索，未配置 Tavily 也可以联网，详见 [供应商说明](PROVIDERS.md)。本次起点为包含鉴权修复的 `e9a982f`，保留该提交全部内容。
+
 本轮保留 Nuxt 4、Bun、Better Auth、Mastra、AI SDK v5、Drizzle 与原 SQLite，采用模块化单体。起始 main/a404788，实施分支 codex/travel-delivery。目录、用户原有修改、首次运行证据见 [工程基线](ARCHITECTURE_BASELINE.md)。真实业务数据库和 .env 未迁移、覆盖或改写；全部数据验收在临时库完成。
 
 变更分批保存在本地：`2f497dc` 基线/清理工具，`630699e` 取消竞态/扫描收敛，`ce0e526` 供应商/媒体/迁移，`0a8030b` JSONL与完整工作区，`c9b87da` 原创品牌，以及最终交付文档提交。未推送或部署。用户开始时的侧栏单行、auth/admin中间件、旧浏览器脚本和auth测试仍独立保留为未提交改动；品牌提交仅暂存自己的侧栏图标差异。

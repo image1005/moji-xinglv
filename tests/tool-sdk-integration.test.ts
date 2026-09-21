@@ -78,6 +78,9 @@ beforeEach(() => {
 })
 
 describe('真实 Mastra 工具与 AI SDK v5 离线集成', () => {
+  it('嵌套序列化工具错误仅展示可操作文案，过滤框架详情', () => {
+    expect(extractActionable(JSON.stringify({ message: 'wrapper', cause: { message: '[actionable] 景点类别只能为 sight/food/stay/transport', name: 'Error' }, details: { model: 'private-provider-detail' } }))).toBe('景点类别只能为 sight/food/stay/transport')
+  })
   it.each(['apply_plan_edits', 'patch_plan_json'] as const)('在 %s 等待修订号时取消，恢复读取后不得提交编辑', async (name) => {
     const controller = new AbortController()
     let completeRead!: (snapshot: unknown) => void

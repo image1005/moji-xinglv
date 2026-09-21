@@ -14,7 +14,7 @@ export function getModelSettings(userId: string) {
   // Provider configuration changes must not silently preserve unsupported preferences.
   if (!capabilities.thinkingLevels.includes(defaults.thinking)) defaults.thinking = capabilities.thinkingLevels[0]!
   if (!capabilities.search.available) defaults.webSearch = false
-  return { defaults, capabilities }
+  return { defaults: validateModelConfiguration(defaults), capabilities }
 }
 export function resolveModelConfiguration(userId: string, input?: unknown): ModelConfiguration {
   return validateModelConfiguration(ModelConfigurationSchema.parse(input ?? getModelSettings(userId).defaults))

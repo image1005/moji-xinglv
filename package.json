@@ -29,6 +29,7 @@
     "test:product": "bun run scripts/test-product.ts",
     "eval:ai": "bun run scripts/eval-ai.ts",
     "verify:providers": "bun run scripts/verify-providers.ts",
+    "verify:planning": "bun run scripts/verify-planning.ts",
     "verify:media": "bun run scripts/verify-media-providers.ts",
     "preview:readme": "bun run scripts/preview-readme.ts"
   },

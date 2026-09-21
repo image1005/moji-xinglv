@@ -33,7 +33,7 @@ async function enrichEntity(userId: string, planId: number, revision: number, en
     const previousRow = db.select().from(planResources).where(and(eq(planResources.userId, userId), eq(planResources.planId, planId), eq(planResources.entityId, entity.entityId), eq(planResources.fingerprint, entity.fingerprint))).get()
     const previous = PlanResourceSchema.safeParse(previousRow?.resourceJson)
     const resource = pending(entity)
-    const [image, location] = await Promise.allSettled([acquireWikimediaImage(entity), locateEntity(entity)])
+    const [image, location] = await Promise.allSettled([acquireWikimediaImage(entity, previous.success && !previous.data.image), locateEntity(entity)])
     const acquired = image.status === 'fulfilled' ? image.value : null
     const confirmedImage = acquired?.image ?? (previous.success ? previous.data.image : null)
     resource.image = confirmedImage ? { ...confirmedImage } : null

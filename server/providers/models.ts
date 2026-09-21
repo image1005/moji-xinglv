@@ -2,6 +2,7 @@ import { createDeepSeek } from '@ai-sdk/deepseek'
 import { defaultSettingsMiddleware, wrapLanguageModel } from 'ai'
 import { createError } from 'h3'
 import type { ModelCapabilities, ModelConfiguration } from '../../shared/schemas/model-config'
+import { configuredSearchProvider } from './search'
 
 // Official endpoint probe on 2026-09-18 confirmed deepseek-chat now returns deepseek-flash.
 // Resolve this verified alias before persistence so request identity records the effective model.
@@ -16,11 +17,12 @@ export function isDeepSeek() {
 export function modelCapabilities(model = configuredModel()): ModelCapabilities {
   const official = isDeepSeek()
   const modern = official && ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp', 'deepseek-v4-pro'].includes(model)
+  const searchProvider = configuredSearchProvider()
   return {
     model, provider: official ? 'DeepSeek' : 'OpenAI-compatible',
     vision: modern || (!official && process.env.AI_SUPPORTS_VISION === 'true'), tools: true,
     thinkingLevels: modern ? ['off', 'light', 'standard', 'deep'] : model === 'deepseek-reasoner' && official ? ['standard'] : ['off'],
-    search: { available: Boolean(process.env.TAVILY_API_KEY), provider: process.env.TAVILY_API_KEY ? 'Tavily' : null, native: false },
+    search: { available: Boolean(searchProvider), provider: searchProvider, native: searchProvider === 'DeepSeek' },
     verification: official ? 'documented' : 'configured',
   }
 }
@@ -30,8 +32,9 @@ export function validateModelConfiguration(config: ModelConfiguration) {
   if (!allowed.has(config.model)) throw createError({ statusCode: 400, statusMessage: '该模型未在服务端启用' })
   const capabilities = modelCapabilities(config.model)
   if (!capabilities.thinkingLevels.includes(config.thinking)) throw createError({ statusCode: 400, statusMessage: '所选模型不支持此思考深度' })
-  if (config.webSearch && !capabilities.search.available) throw createError({ statusCode: 503, statusMessage: '联网搜索未配置：请设置 TAVILY_API_KEY（独立搜索提供方）' })
-  return config
+  if (config.webSearch && !capabilities.search.available) throw createError({ statusCode: 503, statusMessage: '联网搜索未配置：需要官方 DeepSeek 密钥或 TAVILY_API_KEY，请检查 AI_SEARCH_PROVIDER' })
+  const { searchProvider: _previous, ...rest } = config
+  return config.webSearch ? { ...rest, searchProvider: configuredSearchProvider()! } : rest
 }
 function deepseekOptions(config: ModelConfiguration) {
   return { deepseek: {

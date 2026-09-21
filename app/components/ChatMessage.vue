@@ -112,7 +112,7 @@ const streamingEmpty = computed(
           />
         </template>
       </template>
-      <details v-if="sources.length" class="chat-message__sources"><summary>联网来源 · {{ sources.length }} 条</summary><article v-for="source in sources" :key="source.url"><a :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a><p>{{ source.summary }}</p><small>{{ source.provider }} · 获取于 {{ new Date(source.fetchedAt).toLocaleString('zh-CN') }}</small></article></details>
+      <details v-if="sources.length" class="chat-message__sources"><summary>联网来源 · {{ sources.length }} 条</summary><article v-for="source in sources" :key="source.url"><a :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a><p>{{ source.summary || '搜索提供方未返回明文摘要，可打开来源查看。' }}</p><small>{{ source.provider }} · 获取于 {{ new Date(source.fetchedAt).toLocaleString('zh-CN') }}</small></article></details>
 
       <!-- 生成中空状态等待水墨微波 -->
       <div v-if="streamingEmpty" class="chat-message__thinking">

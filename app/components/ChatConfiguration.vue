@@ -17,7 +17,7 @@ function thinkingChanged(event: Event) { modelSettings.update({ thinking: (event
       <span v-if="configuration" class="chat-configuration__model">{{ configuration.model }}</span>
       <span v-if="saving" role="status">保存默认选择…</span>
     </div>
-    <p v-if="capabilities">{{ capabilities.search.available ? `联网由 ${capabilities.search.provider} 独立搜索工具提供` : '联网搜索尚未配置' }} · {{ capabilities.vision ? '支持图片理解' : '当前模型不支持图片理解' }}</p>
+    <p v-if="capabilities">{{ capabilities.search.available ? capabilities.search.native ? '联网由 DeepSeek 官方搜索提供' : `联网由 ${capabilities.search.provider} 独立搜索工具提供` : '联网搜索尚未配置，请检查服务端搜索配置' }} · {{ capabilities.vision ? '支持图片理解' : '当前模型不支持图片理解' }}</p>
     <p v-if="failure" role="alert">{{ failure }} <button type="button" @click="modelSettings.load(true)">重新加载</button></p>
   </div>
 </template>
