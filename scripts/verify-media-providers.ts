@@ -7,12 +7,14 @@ import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
 import sharp from 'sharp'
 import { createProductProviderFetch } from './mock-product-providers'
 import { startProductModel } from './mock-product-ai'
+import type { PlanEntity } from '../shared/utils/plan-entities'
 
 const temporary = await mkdtemp(join(tmpdir(), 'verify-media-'))
 process.env.DATABASE_URL = join(temporary, 'test-media.db')
 process.env.AI_PROVIDER = 'deepseek'
 process.env.AI_MODEL = 'deepseek-flash'
 process.env.AI_API_KEY = process.env.TAVILY_API_KEY = process.env.BAIDU_MAP_AK = 'fixture-only'
+if (!process.argv.includes('--real')) process.env.MEDIA_IMAGE_SEARCH = 'off'
 const storage = new Map<string, unknown>()
 Object.assign(globalThis, { useStorage: () => ({ getItem: async (key: string) => storage.get(key), setItem: async (key: string, value: unknown) => { storage.set(key, value) }, removeItem: async (key: string) => { storage.delete(key) } }) })
 const originalFetch = globalThis.fetch
@@ -20,19 +22,67 @@ globalThis.fetch = createProductProviderFetch(originalFetch)
 const { db } = await import('../server/utils/db')
 const schema = await import('../server/database/schema')
 try {
-  if (process.argv.includes('--real')) {
+  if (process.argv.includes('--real') && process.argv.includes('--tencent')) {
+    globalThis.fetch = originalFetch
+    migrate(db, { migrationsFolder: resolve('server/database/migrations') })
+    process.env.MEDIA_IMAGE_SEARCH = 'tencent'
+    const { searchTencentImages } = await import('../server/providers/tencent-images')
+    const { getResourceImageBytes, trustedImageOrigin } = await import('../server/services/media-image')
+    const { mentionsMediaSubject } = await import('../server/providers/media-identity')
+    try {
+      const candidates = await searchTencentImages('太原 晋祠 实景')
+      let confirmed = false
+      for (const candidate of candidates.filter(item => item.title.includes('太原') && mentionsMediaSubject(item.title, '晋祠')).slice(0, 3)) {
+        const url = new URL(candidate.thumbnailUrl)
+        if (url.protocol === 'http:') url.protocol = 'https:'
+        if (!trustedImageOrigin(url.href)) continue
+        try {
+          await getResourceImageBytes(url.href, `tencent-probe:${url.href}`)
+          confirmed = true
+          console.log(JSON.stringify({ mode: 'real-tencent', status: 'image-fetched-and-decoded', title: candidate.title, source: candidate.siteUrl }))
+          break
+        } catch { /* Try at most three documented CDN candidates. */ }
+      }
+      if (!confirmed) { process.exitCode = 1; console.log(JSON.stringify({ mode: 'real-tencent', status: 'no-confirmed-image', candidateCount: candidates.length })) }
+    } catch (error) {
+      const { imageFailure } = await import('../server/providers/media-errors')
+      process.exitCode = 1
+      console.log(JSON.stringify({ mode: 'real-tencent', status: 'not-verified', ...imageFailure(error) }))
+    }
+  } else if (process.argv.includes('--real')) {
     globalThis.fetch = originalFetch
     migrate(db, { migrationsFolder: resolve('server/database/migrations') })
     const { acquireWikimediaImage } = await import('../server/services/wikimedia')
-    for (const entity of [{ entityId: 'spot:probe', entityType: 'spot' as const, name: '苏州拙政园', city: '苏州', address: '', fingerprint: 'probe' }, { entityId: 'food:probe', entityType: 'food' as const, name: '东坡肉', city: '杭州', address: '', fingerprint: 'probe' }]) {
+    const samples: Array<[PlanEntity['entityType'], string, string]> = process.argv.includes('--coverage') ? [
+      ['city', '太原（晋源区）', '太原（晋源区）'], ['spot', '晋祠', '太原（晋源区）'],
+      ['spot', '天龙山石窟', '太原（晋源区）'], ['spot', '纯阳宫', '太原'], ['spot', '永祚寺（双塔寺）', '太原'],
+      ['spot', '钟楼街·柳巷', '太原'], ['food', '过油肉', '太原'], ['food', '头脑（配帽盒、黄酒）', '太原'],
+    ] : [['spot', '苏州拙政园', '苏州'], ['food', '东坡肉', '杭州']]
+    for (const [entityType, name, city] of samples) {
+      const entity: PlanEntity = { entityId: `${entityType}:probe`, entityType, name, city, address: '', fingerprint: 'probe' }
       const started = Date.now()
       try {
         const result = await acquireWikimediaImage(entity)
         if (!result) process.exitCode = 1
-        console.log(JSON.stringify({ mode: 'real-wikimedia', entity: entity.name, status: result ? 'image-fetched-and-decoded' : 'no-confirmed-image', source: result?.image.sourceUrl, attribution: result?.image.attribution, durationMs: Date.now() - started }))
+        console.log(JSON.stringify({ mode: 'real-wikimedia', entity: entity.name, status: result ? 'image-fetched-and-decoded' : 'no-confirmed-image', matchedName: result?.image.matchedName, source: result?.image.sourceUrl, attribution: result?.image.attribution, durationMs: Date.now() - started }))
       } catch (error) { process.exitCode = 1; console.log(JSON.stringify({ mode: 'real-wikimedia', entity: entity.name, status: 'unreachable-or-provider-error', errorType: error instanceof Error ? error.name : 'Error', contractIssues: error && typeof error === 'object' && 'issues' in error ? error.issues : undefined, durationMs: Date.now() - started })) }
     }
   } else {
+  // Exercise the official SDK under the actual Bun runtime, using only loopback and dummy keys.
+  const { wimgs } = await import('tencentcloud-sdk-nodejs-wimgs')
+  let signedSdkRequest = false
+  const sdkServer = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+    signedSdkRequest = request.headers.get('authorization')?.startsWith('TC3-HMAC-SHA256') === true
+      && request.headers.get('x-tc-action') === 'SearchByText' && request.headers.get('x-tc-version') === '2025-11-06'
+      && (await request.json() as { Query: string }).Query === 'fixture-only'
+    return Response.json({ Response: { Images: [], RequestId: 'fixture-only' } })
+  } })
+  try {
+    const client = new wimgs.v20251106.Client({ credential: { secretId: 'fixture-only', secretKey: 'fixture-only' }, profile: { httpProfile: { endpoint: `127.0.0.1:${sdkServer.port}`, protocol: 'http://', reqTimeout: 3 } } })
+    assert.deepEqual((await client.request('SearchByText', { Query: 'fixture-only' }, { signal: AbortSignal.timeout(3000) })).Images, [])
+    assert(signedSdkRequest, 'Official SDK signs and serializes requests under Bun')
+    console.log(JSON.stringify({ mode: 'isolated-tencent-sdk', status: 'signed-request-and-response-passed', runtime: `Bun ${Bun.version}` }))
+  } finally { sdkServer.stop(true) }
   // Reproduce upgrade from the last released migration with existing user/plan data.
   const history = join(temporary, 'history')
   await mkdir(join(history, 'meta'), { recursive: true })

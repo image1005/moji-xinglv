@@ -2,7 +2,7 @@ import { createError } from 'h3'
 
 /** Bound upstream bodies before parsing. Timeouts cover body reads as well as headers. */
 export async function readProviderBytes(response: Response, maxBytes: number): Promise<Buffer> {
-  if (!response.ok || !response.body) throw createError({ statusCode: 502, statusMessage: `上游服务暂不可用（HTTP ${response.status}）` })
+  if (!response.ok || !response.body) throw createError({ statusCode: 502, statusMessage: `上游服务暂不可用（HTTP ${response.status}）`, data: { providerStatus: response.status } })
   if (Number(response.headers.get('content-length') || 0) > maxBytes) { await response.body.cancel(); throw createError({ statusCode: 502, statusMessage: '上游响应超出大小限制' }) }
   const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let total = 0
   try {

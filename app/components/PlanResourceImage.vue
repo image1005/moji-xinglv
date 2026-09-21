@@ -8,14 +8,15 @@ defineEmits<{ retry: [] }>()
   <figure class="resource-image">
     <div class="resource-image__frame">
       <CachedImage v-if="resource?.image" :src="resource.image.url" :alt="`${label} · ${resource.image.kind === 'food_illustration' ? '菜品示意' : '地点实拍'}`" />
-      <div v-else class="resource-image__empty"><AppIcon :name="resource?.entityType === 'food' ? 'bowl' : 'mountain'" :size="24" /><span>{{ busy ? '正在查找匹配图片…' : resource?.status === 'not_found' ? '尚未找到匹配图片' : resource?.status === 'failed' ? '图片暂未取得' : '图片待补充' }}</span></div>
+      <div v-else class="resource-image__empty"><AppIcon :name="resource?.entityType === 'food' ? 'bowl' : 'mountain'" :size="24" /><span>{{ busy ? '正在查找匹配图片…' : resource?.imageIssue?.code === 'no_match' || resource?.status === 'not_found' ? '图库暂无匹配图片' : resource?.imageIssue || resource?.status === 'failed' ? '图片来源请求失败' : '图片待补充' }}</span></div>
     </div>
     <figcaption>
       <strong>{{ label }}</strong>
       <span v-if="resource?.image">{{ resource.image.kind === 'food_illustration' ? '菜品示意，非指定餐厅实拍' : '地点实拍' }}</span>
+      <span v-if="resource?.image?.matchedName && resource.image.matchedName !== label">图片对应：{{ resource.image.matchedName }}</span>
       <a v-if="resource?.image" :href="resource.image.sourceUrl" target="_blank" rel="noopener noreferrer">{{ resource.image.provider }} · {{ resource.image.attribution || '查看来源' }}</a>
       <span v-if="resource?.error" class="resource-image__error">{{ resource.error }}</span>
-      <button v-if="resource && (!resource.image || resource.error)" type="button" :disabled="busy || disabled" @click="$emit('retry')">{{ busy ? '查找中…' : '重试图片与定位' }}</button>
+      <button v-if="resource && (!resource.image || resource.error)" type="button" :disabled="busy || disabled" @click="$emit('retry')">{{ busy ? '查找中…' : resource.imageIssue?.code === 'no_match' ? '重新查找图片与定位' : '重试图片与定位' }}</button>
     </figcaption>
   </figure>
 </template>

@@ -6,7 +6,9 @@ import { planResources, plans } from '../database/schema'
 import { db } from '../utils/db'
 import { getPlanSnapshot, parsePlanJson } from './plan'
 import { locateEntity } from './baidu'
-import { acquireWikimediaImage, getResourceImageBytes } from './wikimedia'
+import { getResourceImageBytes } from './media-image'
+import { acquireTravelImage } from './travel-images'
+import { imageFailure } from '../providers/media-errors'
 
 const pending = (entity: PlanEntity): PlanResource => ({ entityId: entity.entityId, entityType: entity.entityType, name: entity.name, city: entity.city, status: 'pending', image: null, location: null, error: null })
 const imageUrl = (planId: number, entity: PlanEntity) => `/api/plans/${planId}/resource-image?entityId=${encodeURIComponent(entity.entityId)}&v=${entity.fingerprint}`
@@ -17,6 +19,9 @@ export async function getPlanResources(userId: string, planId: number): Promise<
     const row = rows.find(value => value.entityId === entity.entityId && value.fingerprint === entity.fingerprint)
     const parsed = PlanResourceSchema.safeParse(row?.resourceJson)
     if (!parsed.success) return pending(entity)
+    // Previous releases could persist false negatives for decorated names. Re-evaluate once
+    // with the new resolver, without changing the user's plan or requiring a data migration.
+    if (!parsed.data.image && parsed.data.imageIssue === undefined) return { ...parsed.data, status: 'pending', error: null }
     if (parsed.data.image) parsed.data.image.url = imageUrl(planId, entity)
     return parsed.data
   }) }
@@ -33,7 +38,7 @@ async function enrichEntity(userId: string, planId: number, revision: number, en
     const previousRow = db.select().from(planResources).where(and(eq(planResources.userId, userId), eq(planResources.planId, planId), eq(planResources.entityId, entity.entityId), eq(planResources.fingerprint, entity.fingerprint))).get()
     const previous = PlanResourceSchema.safeParse(previousRow?.resourceJson)
     const resource = pending(entity)
-    const [image, location] = await Promise.allSettled([acquireWikimediaImage(entity, previous.success && !previous.data.image), locateEntity(entity)])
+    const [image, location] = await Promise.allSettled([acquireTravelImage(entity, previous.success && !previous.data.image), locateEntity(entity)])
     const acquired = image.status === 'fulfilled' ? image.value : null
     const confirmedImage = acquired?.image ?? (previous.success ? previous.data.image : null)
     resource.image = confirmedImage ? { ...confirmedImage } : null
@@ -41,7 +46,10 @@ async function enrichEntity(userId: string, planId: number, revision: number, en
     const failed = image.status === 'rejected' || location.status === 'rejected'
     resource.status = resource.image || resource.location ? 'ready' : failed ? 'failed' : 'not_found'
     const reused = !acquired && resource.image !== null
-    resource.error = failed ? '部分资源服务暂不可用，可稍后重试；已有结果仍可查看。' : reused ? '本次未取得新图片，保留同一地点先前已确认的图片。' : resource.status === 'not_found' ? '未找到可确认匹配的图片或地点；请核实名称、城市及地址。' : null
+    resource.imageIssue = image.status === 'rejected' ? imageFailure(image.reason) : acquired ? null
+      : { code: 'no_match', message: '已查询当前可用图片来源，暂无可确认匹配的图片。请补充准确名称；反复重试相同名称可能仍无结果。' }
+    resource.error = [resource.imageIssue?.message, location.status === 'rejected' ? '地点定位服务暂不可用，可稍后重试。' : null,
+      reused ? '保留同一地点先前已确认的图片。' : null].filter(Boolean).join(' ') || null
     db.transaction(tx => {
       const row = tx.select().from(plans).where(and(eq(plans.id, planId), eq(plans.userId, userId))).get()
       if (!row || row.revision !== revision) throw createError({ statusCode: 409, statusMessage: '规划已修改，已丢弃旧资源查询结果' })

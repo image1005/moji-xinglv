@@ -1,5 +1,7 @@
 # 2026-09-18 渐进式架构与图文产品交付
 
+2026-09-21 后续图片覆盖修复：[原因、腾讯云文搜图接入与配置](MEDIA_COVERAGE_FIX.md)。起点0f52c4c，修复名称匹配/消歧/Commons独立检索及旧缺图状态，并增加官方腾讯云SDK作为补充来源；283项测试与完整发布检查通过，免费图片8项真实验证通过，腾讯云真实联调因缺凭据未完成。以 [最新验证记录](VERIFICATION.md) 为准。
+
 2026-09-21 补充修复：[联网、图片与落笔编排修复记录](SEARCH_PLANNING_FIX.md)。下表保留9月18日交付时的验证边界；当前已增加并实测 DeepSeek 官方 Anthropic 搜索，未配置 Tavily 也可以联网，详见 [供应商说明](PROVIDERS.md)。本次起点为包含鉴权修复的 `e9a982f`，保留该提交全部内容。
 
 本轮保留 Nuxt 4、Bun、Better Auth、Mastra、AI SDK v5、Drizzle 与原 SQLite，采用模块化单体。起始 main/a404788，实施分支 codex/travel-delivery。目录、用户原有修改、首次运行证据见 [工程基线](ARCHITECTURE_BASELINE.md)。真实业务数据库和 .env 未迁移、覆盖或改写；全部数据验收在临时库完成。

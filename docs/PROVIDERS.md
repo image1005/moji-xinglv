@@ -52,7 +52,13 @@ DeepSeek 的 [Anthropic 兼容接口官方说明](https://api-docs.deepseek.com/
 
 - `@ai-sdk/deepseek@1.0.57`：AI SDK v5 对齐分支，本次检查为近期维护；直接声明，避免依赖 Mastra 偶然传递安装。纯 TypeScript 服务端 provider，客户端不打包。替代自制供应商协议转换，沿用 ai 5 / Mastra 现有大版本，无消息数据库重写。
 - `sharp@0.34.5`：实际解码验证格式/尺寸、去 EXIF、生成安全 WebP；Node/Bun 支持且本机 Bun 1.4.2 实测。现有库没有安全的图像解码器，仅检查扩展名或魔数不足。它带平台原生 libvips 包，是本次主要服务端体积增加；客户端无新增负担。上传数据是新增表，无已有附件迁移成本。
-- 搜索和 Wikimedia 复用平台 fetch、Zod、已有缓存；未引入整套第三方 SDK。版本及锁文件均直接声明/冻结安装。
+- 文字搜索和 Wikimedia 复用平台 fetch、Zod、已有缓存。腾讯云图片搜索使用官方单产品 `tencentcloud-sdk-nodejs-wimgs@4.1.225`，直接声明并更新 bun.lock；复用 TC3 签名、临时凭据、错误解析与取消支持，避免自写一套云鉴权。该包官方发布、与腾讯云公共 SDK 同步维护，本次包体解压约25.8 KB（不含公共 SDK 与传递依赖）；仅服务端使用，不增加浏览器依赖，不升级 AI SDK/Mastra。Node 隔离 HTTP 测试及实际 Bun 运行时探针验证兼容，最终 Nuxt 构建体积见本次验证记录。既有图片缓存/资源表无需迁移。
+
+## 腾讯云联网文搜图
+
+按 [官方 SearchByText 文档](https://cloud.tencent.com/document/api/1815/127087) 使用 `wimgs.tencentcloudapi.com`、版本 `2025-11-06`，入参 Query，逐条校验 Images 中的 JSON 字符串。[开通与密钥说明](https://cloud.tencent.com/document/product/1815/127079)；环境变量、配额和真实探针见 [图片覆盖修复](MEDIA_COVERAGE_FIX.md)。服务端不开放可自定义请求地址，密钥不进入客户端。官方 SDK 拥有 HTTP、签名及 JSON 解析，应用在解析后限制最多20条、每条20 KB；不修改 SDK 私有方法，也不宣称这是响应读取前的流量上限。请求12秒超时，图片下载另有5 MiB硬限制。
+
+当前本机没有腾讯云密钥，已完成 SDK/适配/下载链路的隔离验证，未宣称腾讯云真实图片搜索已联调。配置后执行一次 `bun run verify:media --real --tencent` 可验证真实搜索、匹配及图片解码；该命令调用付费服务。
 
 ## 模拟验证边界
 

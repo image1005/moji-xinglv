@@ -1,5 +1,22 @@
 # 山海行笺：实际验证记录
 
+## 2026-09-21 图片覆盖与腾讯云补充来源
+
+起点 `codex/travel-delivery/0f52c4c`，初始工作区干净。原因、模块、腾讯云配置和验证边界见 [MEDIA_COVERAGE_FIX](MEDIA_COVERAGE_FIX.md)。本轮新增官方单产品腾讯云SDK及锁文件，无数据库迁移；未写真实业务库或修改.env。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `bun run check:release` | 整条发布检查退出0；lint、Nuxt/脚本typecheck、35文件283测试、Knip全量和生产检查均通过 |
+| `bun run verify:media`（发布检查内） | 原20类隔离断言通过；新增官方腾讯SDK在Bun 1.4.2下真实签名并请求loopback、解析响应通过 |
+| 生产构建 | 成功，43.5 MB / 14.4 MB gzip；本轮腾讯SDK前为42.6 MB / 14.2 MB gzip，服务端增加约0.9 MB / 0.2 MB gzip。客户端不引入SDK |
+| HTTP / 恢复 | 11项HTTP、5阶段强制中断和同库重启恢复通过 |
+| 浏览器 | 10阶段工作区、草稿、冲突、版本、移动视口及换号隔离通过，无未捕获UI异常 |
+| 图文产品流程 | 6阶段通过，含上传重试、纯图、搜索/思考、实字节图片和模拟地图、图片503重试、保存/刷新/带图追问、取消、跨用户跨工作区拒绝 |
+| `bun run verify:media --real --coverage` | Wikimedia 8项真实下载并解码通过，含带括号城市/别名、同名景点、组合景点与美食；来源和署名保留。腾讯加入前已验证此路径，之后仅提取共用下载模块 |
+| `bun run verify:media --real --tencent` | 退出1，明确返回configuration/not-verified。本机缺腾讯云凭据，未完成真实腾讯联调；不把隔离HTTP和测试图片当成线上结果 |
+
+日志：`.verification/tencent-images-release.log`、`.verification/tencent-images-unit.log`、`.verification/media-coverage-live.log`、`.verification/tencent-images-live.log`。浏览器报告：`.verification/browser/2026-09-21T08-13-22-403Z/report.json`；恢复：`.verification/recovery/2026-09-21T08-13-19-540Z/report.json`；图文产品：`.verification/product/2026-09-21T08-13-41-128Z/report.json`。腾讯适配测试运行官方SDK而非仿写签名；实际云端能力和账号授权仍待凭据验证。构建保留已有上游警告，未关闭规则或扩大Knip忽略范围。
+
 ## 2026-09-21 联网、图片与落笔编排修复
 
 起点 `codex/travel-delivery/e9a982f`，干净工作区。故障证据、修复和使用方式见 [SEARCH_PLANNING_FIX](SEARCH_PLANNING_FIX.md)。无新增依赖或迁移，.env及真实业务数据未改写。

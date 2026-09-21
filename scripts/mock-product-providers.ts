@@ -11,7 +11,7 @@ export function createProductProviderFetch(originalFetch: typeof fetch): typeof 
     if (url.hostname === 'api.tavily.com' && url.pathname === '/search') return json({ results: [{ title: '[本地测试] 旅行资料', url: 'https://example.org/fixture-travel', content: '这是隔离测试来源，用于验证搜索引用协议，不代表真实营业或门票信息。' }] })
     if (url.hostname === 'zh.wikipedia.org') {
       const title = url.searchParams.get('titles') || '西湖'
-      return json({ query: { pages: { '1': { title, extract: `${title}位于杭州。这是本地媒体集成测试资料。`, pageimage: 'Shanhai-fixture.png', pageprops: {} } } } })
+      return json({ query: { pages: { '1': { title, extract: `${title}位于杭州。这是本地景点和美食媒体集成测试资料。`, pageimage: 'Shanhai-fixture.png', pageprops: {} } } } })
     }
     if (url.hostname === 'commons.wikimedia.org') return json({ query: { pages: { '2': { imageinfo: [{ url: 'https://upload.wikimedia.org/test-fixture.png', thumburl: 'https://upload.wikimedia.org/test-fixture.png', descriptionurl: 'https://commons.wikimedia.org/wiki/File:Shanhai-fixture.png', extmetadata: { Artist: { value: '[本地测试图] 山海行笺' }, LicenseShortName: { value: '测试夹具，不是实景' } } }] } } } })
     if (url.hostname === 'upload.wikimedia.org') return new Response(new Uint8Array(await fixtureImage), { headers: { 'content-type': 'image/png' } })
