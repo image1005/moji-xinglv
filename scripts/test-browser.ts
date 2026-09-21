@@ -345,11 +345,7 @@ try {
   })
   await step('无未捕获 UI 异常或非预期 AI/地图请求，CDN 资源保持隔离', async () => {
     assert.deepEqual(pageErrors, [])
-    const unexpected = externalRequests.filter((url) => {
-      const resource = new URL(url)
-      return resource.origin !== 'https://unpkg.com'
-        && !(resource.origin === 'https://fonts.googleapis.com' && resource.pathname === '/css2')
-    })
+    const unexpected = externalRequests.filter(url => new URL(url).origin !== 'https://unpkg.com')
     assert.deepEqual(unexpected, [], '发现已声明静态资源之外的非预期外部请求，已全部阻断')
   })
 } catch (error) {
@@ -366,7 +362,7 @@ try {
   if (serverErrors) writeFileSync(join(artifacts, 'server-errors.log'), await serverErrors)
   writeFileSync(join(artifacts, 'report.json'), JSON.stringify({
     passed: !failure, runId, steps, pageErrors, authResponses, blockedExternalResources: [...new Set(externalRequests)], mock: mock.state,
-    optionalResourceImpact: externalRequests.length ? 'Google 字体样式和 Markdown 编辑器尝试的 unpkg 静态扩展均已阻断；使用本机后备字体，外部高亮、公式、图表与格式化扩展不在本轮验收范围，未实际访问 CDN。' : '未观察到外部静态资源请求。',
+    optionalResourceImpact: externalRequests.length ? 'Markdown 编辑器尝试的 unpkg 静态扩展已阻断；外部高亮、公式、图表与格式化扩展不在本轮验收范围，未实际访问 CDN。' : '未观察到外部静态资源请求。',
     scope: '生产 UI/HTTP、临时数据库、本地 OpenAI SSE。移动端使用桌面 Chromium 缩小 viewport，未模拟真实系统软键盘。',
   }, null, 2))
   const checked = realpathSync(temporaryDirectory)

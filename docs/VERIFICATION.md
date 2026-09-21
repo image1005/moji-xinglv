@@ -1,5 +1,13 @@
 # 山海行笺：实际验证记录
 
+## 2026-09-21 PR 更新前同步主分支
+
+从已验证的 c2e04f9 合入 origin/main 的 b2fb1b7，保留移动抽屉优先聚焦关闭按钮及移除 Google Fonts 的上游修复，同时保留本分支品牌图标。移除浏览器测试对 Google Fonts 的豁免；未改动行程/聊天/媒体业务实现。
+
+合并后完整重跑 `bun run check:release`，退出0：lint、Nuxt/脚本类型检查、35文件283测试、Knip全量和生产、20类媒体/迁移断言及Bun官方腾讯SDK本地验证、生产构建（43.5 MB / 14.4 MB gzip）、11项HTTP、5阶段恢复、10阶段浏览器与6阶段图文产品流程全部通过。没有重复调用付费外部服务，之前真实探针的验证边界保持不变。
+
+日志 `.verification/pr-update-release.log`；报告 `.verification/recovery/2026-09-21T08-37-53-103Z/report.json`、`.verification/browser/2026-09-21T08-37-55-743Z/report.json`、`.verification/product/2026-09-21T08-38-14-522Z/report.json`。全部数据库为隔离临时库。
+
 ## 2026-09-21 图片覆盖与腾讯云补充来源
 
 起点 `codex/travel-delivery/0f52c4c`，初始工作区干净。原因、模块、腾讯云配置和验证边界见 [MEDIA_COVERAGE_FIX](MEDIA_COVERAGE_FIX.md)。本轮新增官方单产品腾讯云SDK及锁文件，无数据库迁移；未写真实业务库或修改.env。

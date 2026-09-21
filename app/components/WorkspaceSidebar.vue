@@ -28,7 +28,11 @@ watch([uiLeftOpen, mobile], async ([open, compact]) => {
   if (open && compact) {
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     await nextTick()
-    if (uiLeftOpen.value) drawer.value?.querySelector<HTMLElement>('button:not(:disabled)')?.focus()
+    if (uiLeftOpen.value) {
+      const closeBtn = drawer.value?.querySelector<HTMLElement>('.ws__close')
+      if (closeBtn) closeBtn.focus()
+      else drawer.value?.querySelector<HTMLElement>('button:not(:disabled)')?.focus()
+    }
   } else if (returnFocus) {
     const target = returnFocus
     returnFocus = null
