@@ -67,11 +67,13 @@ function createWorkspaceState() {
     clearOtherPlan(planId)
     mainMode.value = 'chat'
     loading.value = true
+    // Publish the navigation state before I/O so restoration cannot toggle a folder
+    // underneath a user click or overwrite a collapse made while loading.
+    expanded.value = { ...expanded.value, [planId]: true }
+    persistUi()
     try {
       await Promise.all([loadPlan(planId, token), loadConversations(planId)])
       if (token !== navigation) return
-      expanded.value = { ...expanded.value, [planId]: true }
-      persistUi()
       const list = conversationsByPlan.value.get(planId) ?? []
       const conversation = list.find((c) => c.id === preferred) ?? list[0]
       if (opts.conversationId) await selectConversation(opts.conversationId, planId, token)

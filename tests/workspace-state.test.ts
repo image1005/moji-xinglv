@@ -72,6 +72,19 @@ afterEach(() => {
 })
 
 describe('工作区状态隔离与并发保护', () => {
+  it('进入工作区立即展开导航，异步恢复完成后不覆盖用户的折叠操作', async () => {
+    const workspace = useWorkspace()
+    const response = deferred<PlanDetail>()
+    mocks.plans.detail.mockReturnValueOnce(response.promise)
+    const opening = workspace.openWorkspace(1)
+    expect(workspace.isExpanded(1)).toBe(true)
+    workspace.toggleExpanded(1)
+    expect(workspace.isExpanded(1)).toBe(false)
+    response.resolve(plan(1))
+    await opening
+    expect(workspace.currentPlan.value?.id).toBe(1)
+    expect(workspace.isExpanded(1)).toBe(false)
+  })
   it('搜索首屏未完成时禁止携带旧游标加载更多，迟到旧响应也不能覆盖搜索', async () => {
     vi.useFakeTimers()
     const workspace = useWorkspace()

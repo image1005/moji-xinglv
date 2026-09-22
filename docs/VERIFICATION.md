@@ -1,5 +1,13 @@
 # 山海行笺：实际验证记录
 
+## 2026-09-22 CI 登录恢复与导航展开竞态
+
+PR #2 的 [失败运行35739103301](https://github.com/image1005/moji-xinglv/actions/runs/35739103301) 对应761b220。Ubuntu CI的安装、check（290测试）、媒体验证、构建、HTTP和恢复全部成功；浏览器最后一次重新登录账号甲后，规划入口点击超时，日志显示目标处于 `collapse-shell collapsed`、展开按钮 `aria-expanded=false`。后续图文产品步骤因前步失败未执行，不能视为通过。
+
+`openWorkspace` 原先在异步读取规划/会话之后才展开导航：测试读取折叠状态后准备点击期间，登录自动恢复可能先将其展开，随后的切换点击又把它折叠；加载期间用户主动折叠也会被迟到恢复覆盖。现将展开及偏好保存放到读取前，完成时不再次覆写。浏览器导航助手先等待规划入口可用，再检查/展开目录并断言展开状态；保留正常点击，不使用force、增加固定等待、跳过断言或放宽超时。
+
+新增可控延迟的工作区回归，原实现失败（`.verification/ci-navigation-before.log`），修复后工作区28项测试全部通过。完整 `bun run check:release` 退出0：36文件291测试、lint/typecheck/Knip、隔离媒体、构建、11项HTTP、5阶段恢复、10阶段浏览器和6阶段图文产品流程全部通过。日志 `.verification/ci-navigation-release.log`；浏览器报告 `.verification/browser/2026-09-22T14-30-18-121Z/report.json`，产品报告 `.verification/product/2026-09-22T14-30-36-978Z/report.json`。所有数据库为临时库，没有新增依赖或迁移；Linux远程复验以修复提交的GitHub Actions结果为准。
+
 ## 2026-09-22 前端与服务端图片缓存
 
 起点 `codex/travel-delivery/27be968`，工作区干净；用户确认图片7天、搜索命中1天。基线 `bun run check` 成功，35文件283测试，日志 `.verification/image-cache-baseline.log`。复用已有IndexedDB和Nitro/SQLite，新增选图复用与同图并发下载合并、图片身份缓存地址及坏缓存重试；无新增依赖、锁文件改动或数据库迁移，没有改写真实业务库/.env。缓存规则见 [IMAGE_CACHE](IMAGE_CACHE.md)。

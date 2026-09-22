@@ -79,8 +79,11 @@ async function openFolder(title: string) {
   await showNavigation()
   const target = folder(title)
   await expect(target).toBeVisible()
+  // Listing a folder does not mean its automatic login restoration has finished.
+  await expect(target.locator('.row--plan')).toBeEnabled()
   const toggle = target.locator('.folder__toggle')
   if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
   return target
 }
 
