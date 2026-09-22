@@ -1,5 +1,7 @@
 # 图片、地点与附件
 
+2026-09-22 缓存补充：前后端图片7天，成功搜索和最终选图1天；跨工作区复用公开选图、同图并发下载合并，图片替换改变代理URL，本地坏缓存可单图重试恢复。具体容量、身份隔离和失效规则见 [IMAGE_CACHE](IMAGE_CACHE.md)，实际检查见 [VERIFICATION](VERIFICATION.md)。
+
 ## 职责与数据来源
 
 `shared/schemas/attachment.ts`、`media.ts` 定义跨端运行时契约；`shared/utils/plan-entities.ts` 负责行程实体身份。服务端 `attachments` 管私有用户图片；`travel-images` 选择免费图库与腾讯云补充来源，`wikimedia`/`providers/tencent-images` 各管接口差异，`media-image` 统一受控图片下载/解码/缓存；`baidu` 管地点/地图供应商差异；`media` 聚合派生资源并做修订保护。它们不代替行程唯一写入事务。

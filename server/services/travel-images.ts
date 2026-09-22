@@ -4,8 +4,29 @@ import { mediaIdentity, mediaNameKey, mentionsMediaSubject } from '../providers/
 import { searchTencentImages, tencentImageSearchEnabled } from '../providers/tencent-images'
 import { getResourceImageBytes, trustedImageOrigin, type AcquiredImage } from './media-image'
 import { acquireWikimediaImage } from './wikimedia'
+import { getCachedJson, setCachedJson } from './cache'
+
+const resolving = new Map<string, Promise<AcquiredImage | null>>()
 
 export async function acquireTravelImage(entity: PlanEntity, retryMissing = false): Promise<AcquiredImage | null> {
+  const identity = mediaIdentity(entity)
+  const key = await hashKey('travel-image-selection-v1', { ...identity, type: entity.entityType, address: entity.address, tencent: tencentImageSearchEnabled() })
+  const existing = resolving.get(key)
+  if (existing) return existing
+  const job = (async () => {
+    const cached = await getCachedJson<AcquiredImage>(key)
+    if (cached) {
+      try { await getResourceImageBytes(cached.originUrl, cached.cacheKey); return cached } catch { /* Rediscover an expired or unavailable CDN image. */ }
+    }
+    const result = await resolveTravelImage(entity, retryMissing)
+    if (result) await setCachedJson(key, result, 86400)
+    return result
+  })().finally(() => resolving.delete(key))
+  resolving.set(key, job)
+  return job
+}
+
+async function resolveTravelImage(entity: PlanEntity, retryMissing: boolean): Promise<AcquiredImage | null> {
   let wikiError: unknown
   try { const image = await acquireWikimediaImage(entity, retryMissing); if (image) return image } catch (error) { wikiError = error }
   if (!tencentImageSearchEnabled()) { if (wikiError) throw wikiError; return null }

@@ -11,7 +11,7 @@ import { acquireTravelImage } from './travel-images'
 import { imageFailure } from '../providers/media-errors'
 
 const pending = (entity: PlanEntity): PlanResource => ({ entityId: entity.entityId, entityType: entity.entityType, name: entity.name, city: entity.city, status: 'pending', image: null, location: null, error: null })
-const imageUrl = (planId: number, entity: PlanEntity) => `/api/plans/${planId}/resource-image?entityId=${encodeURIComponent(entity.entityId)}&v=${entity.fingerprint}`
+const imageUrl = (planId: number, entity: PlanEntity, imageKey: string | null | undefined) => `/api/plans/${planId}/resource-image?entityId=${encodeURIComponent(entity.entityId)}&v=${entity.fingerprint}${imageKey ? `&image=${encodeURIComponent(imageKey)}` : ''}`
 export async function getPlanResources(userId: string, planId: number): Promise<PlanResources> {
   const snapshot = await getPlanSnapshot(userId, planId)
   const rows = db.select().from(planResources).where(and(eq(planResources.planId, planId), eq(planResources.userId, userId))).all()
@@ -22,7 +22,7 @@ export async function getPlanResources(userId: string, planId: number): Promise<
     // Previous releases could persist false negatives for decorated names. Re-evaluate once
     // with the new resolver, without changing the user's plan or requiring a data migration.
     if (!parsed.data.image && parsed.data.imageIssue === undefined) return { ...parsed.data, status: 'pending', error: null }
-    if (parsed.data.image) parsed.data.image.url = imageUrl(planId, entity)
+    if (parsed.data.image) parsed.data.image.url = imageUrl(planId, entity, row?.imageCacheKey)
     return parsed.data
   }) }
 }
@@ -55,7 +55,7 @@ async function enrichEntity(userId: string, planId: number, revision: number, en
       if (!row || row.revision !== revision) throw createError({ statusCode: 409, statusMessage: '规划已修改，已丢弃旧资源查询结果' })
       const current = planEntities(parsePlanJson(row.planJson)).find(value => value.entityId === entity.entityId)
       if (!current || current.fingerprint !== entity.fingerprint) throw createError({ statusCode: 409, statusMessage: '地点已修改，已丢弃旧资源查询结果' })
-      if (resource.image) resource.image.url = imageUrl(planId, entity)
+      if (resource.image) resource.image.url = imageUrl(planId, entity, acquired?.cacheKey ?? previousRow?.imageCacheKey)
       const values = { userId, planId, entityId: entity.entityId, fingerprint: entity.fingerprint, planRevision: revision, resourceJson: resource, imageOriginUrl: acquired?.originUrl ?? (resource.image ? previousRow?.imageOriginUrl : null), imageCacheKey: acquired?.cacheKey ?? (resource.image ? previousRow?.imageCacheKey : null), updatedAt: new Date() }
       tx.insert(planResources).values(values).onConflictDoUpdate({ target: [planResources.planId, planResources.entityId], set: values }).run()
     })
@@ -78,10 +78,10 @@ export async function enrichPlanResources(userId: string, planId: number, expect
   for (let i = 0; i < selected.length; i += 2) await Promise.all(selected.slice(i, i + 2).map(entity => enrichEntity(userId, planId, expectedRevision, entity)))
   return getPlanResources(userId, planId)
 }
-export async function readPlanResourceImage(userId: string, planId: number, entityId: string, fingerprint?: string) {
+export async function readPlanResourceImage(userId: string, planId: number, entityId: string, fingerprint?: string, imageKey?: string) {
   const snapshot = await getPlanSnapshot(userId, planId)
   const entity = planEntities(snapshot.plan).find(value => value.entityId === entityId)
   const row = db.select().from(planResources).where(and(eq(planResources.planId, planId), eq(planResources.entityId, entityId), eq(planResources.userId, userId))).get()
-  if (!entity || !row || row.fingerprint !== entity.fingerprint || (fingerprint && fingerprint !== entity.fingerprint) || !row.imageOriginUrl || !row.imageCacheKey) throw createError({ statusCode: 404, statusMessage: '该地点图片暂不可用' })
+  if (!entity || !row || row.fingerprint !== entity.fingerprint || (fingerprint && fingerprint !== entity.fingerprint) || (imageKey && imageKey !== row.imageCacheKey) || !row.imageOriginUrl || !row.imageCacheKey) throw createError({ statusCode: 404, statusMessage: '该地点图片暂不可用' })
   return getResourceImageBytes(row.imageOriginUrl, row.imageCacheKey)
 }

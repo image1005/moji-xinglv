@@ -31,6 +31,7 @@ const env = {
   NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), HOST: '127.0.0.1', PORT: String(port),
 }
 const steps: string[] = [], pageErrors: string[] = [], wire: { type: string; binary: boolean }[] = []
+const resourceReads = new Map<string, number>()
 let browser: Browser | undefined, page: Page | undefined, server: ReturnType<typeof Bun.spawn> | undefined
 let stdout: Promise<string> | undefined, stderr: Promise<string> | undefined
 let passed = false, planId = 0, conversationId = 0, attachmentId = '', failResourceReads = true
@@ -71,7 +72,12 @@ try {
     page.on('pageerror', error => pageErrors.push(error.message))
     page.on('request', request => { if (request.url().endsWith('/api/chat') && request.method() === 'POST') wire.push({ type: request.headers()['content-type'] ?? '', binary: (request.postData() ?? '').includes('base64') }) })
     await page.route('**/*', route => new URL(route.request().url()).origin === origin || /^(data|blob):/.test(route.request().url()) ? route.continue() : route.abort())
-    await page.route('**/resource-image?*', route => failResourceReads ? route.fulfill({ status: 503, body: 'explicit local image failure fixture' }) : route.continue())
+    await page.route('**/resource-image?*', route => {
+      const url = new URL(route.request().url())
+      const key = url.pathname + url.search
+      resourceReads.set(key, (resourceReads.get(key) ?? 0) + 1)
+      return failResourceReads ? route.fulfill({ status: 503, body: 'explicit local image failure fixture' }) : route.continue()
+    })
     await api('/api/auth/sign-up/email', 'POST', { email: `${crypto.randomUUID()}@example.invalid`, password: crypto.randomUUID() + 'Aa9!', name: '产品隔离测试' })
     planId = (await api<{ planId: number }>('/api/plans', 'POST', { title: '图文产品验收' })).planId
     conversationId = (await api<{ id: number }>('/api/conversations', 'POST', { planId })).id
@@ -126,9 +132,42 @@ try {
     failResourceReads = false
     await firstImage.getByRole('button', { name: '重试', exact: true }).click()
     await expect(firstImage.locator('img')).toBeVisible()
+    const firstName = await firstImage.locator('strong').textContent()
+    const imagePath = resources.resources.find(item => item.name === firstName)!.image!.url
+    const requestsBeforeReload = resourceReads.get(imagePath) ?? 0
+    assert(requestsBeforeReload > 0)
     await page!.reload()
     await (await expandedFolder()).locator('.row--plan').click()
     await page!.getByRole('tab', { name: '行程总览', exact: true }).click()
+    const restoredImage = page!.locator('.resource-image').filter({ has: page!.getByText(firstName!, { exact: true }) }).first()
+    await restoredImage.scrollIntoViewIfNeeded()
+    await expect(restoredImage.locator('img')).toBeVisible()
+    assert.equal(resourceReads.get(imagePath), requestsBeforeReload, 'Browser reload must reuse IndexedDB, with HTTP cache disabled by Playwright routing')
+    // Seed a legacy corrupt entry and exercise the actual component retry against real IndexedDB.
+    await page!.evaluate(async path => {
+      const database = await new Promise<IDBDatabase>((done, reject) => { const request = indexedDB.open('guofeng-travel', 2); request.onsuccess = () => done(request.result); request.onerror = () => reject(request.error) })
+      try {
+        await new Promise<void>((done, reject) => {
+          const tx = database.transaction(['kv', 'metadata'], 'readwrite')
+          tx.oncomplete = () => done(); tx.onerror = () => reject(tx.error)
+          const request = tx.objectStore('kv').openCursor()
+          request.onsuccess = () => {
+            const cursor = request.result
+            if (!cursor) return
+            if (String(cursor.key).endsWith(`:blob:${path}`)) cursor.update({ key: cursor.key, payload: new Blob(['corrupt legacy photo'], { type: 'image/webp' }) })
+            cursor.continue()
+          }
+        })
+      } finally { database.close() }
+    }, imagePath)
+    await page!.reload()
+    await (await expandedFolder()).locator('.row--plan').click()
+    await page!.getByRole('tab', { name: '行程总览', exact: true }).click()
+    await restoredImage.scrollIntoViewIfNeeded()
+    await expect(restoredImage.getByRole('button', { name: '重试', exact: true })).toBeVisible()
+    await restoredImage.getByRole('button', { name: '重试', exact: true }).click()
+    await expect(restoredImage.locator('img')).toBeVisible()
+    assert.equal(resourceReads.get(imagePath), requestsBeforeReload + 1, 'Retry discards corrupt local cache and makes exactly one new server request')
     await page!.getByLabel('地图每日路线').selectOption('0')
     const map = page!.getByRole('region', { name: '目标城市地图' })
     await map.scrollIntoViewIfNeeded()
@@ -192,7 +231,7 @@ try {
 } finally {
   await browser?.close(); server?.kill(); if (server) await server.exited
   mock.server.stop(true)
-  writeFileSync(join(reportDirectory, 'report.json'), JSON.stringify({ passed, steps, pageErrors, wire, model: mock.state, scope: '真实生产构建/浏览器/SQLite/工具；图片、地图、搜索及模型为显式隔离fixture，非真实供应商验收' }, null, 2))
+  writeFileSync(join(reportDirectory, 'report.json'), JSON.stringify({ passed, steps, pageErrors, wire, resourceReads: Object.fromEntries(resourceReads), model: mock.state, scope: '真实生产构建/浏览器/IndexedDB/SQLite/工具；图片、地图、搜索及模型为显式隔离fixture，非真实供应商验收' }, null, 2))
   if (stdout) writeFileSync(join(reportDirectory, 'server.log'), await stdout)
   if (stderr) writeFileSync(join(reportDirectory, 'server-errors.log'), await stderr)
   const checked = realpathSync(directory), segment = relative(temporaryRoot, checked)

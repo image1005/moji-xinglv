@@ -95,7 +95,7 @@
 - `GET /api/attachments/:id`：验证用户与所属规划，再返回图片正文；`DELETE` 移除未发送附件，已关联消息的附件受引用规则保护。跨用户、跨工作区访问不泄露存在性。清理规则见媒体文档。
 - `GET /api/plans/:id/resources` → `{ revision, resources }`；每个资源以稳定 entityId 关联，包含状态、图片来源／提供方／署名／类型及已确认坐标系和来源。
 - `POST /api/plans/:id/resources` 接收 `{ expectedRevision, entityId? }`，逐步获取实际图片和地点；写回重新检查用户、规划、revision、实体指纹，不增加行程版本。失败保留明确状态供重试。
-- `GET /api/plans/:id/resource-image?entityId=...`：按规划授权后代理已确认图片，检查域名、大小和真实解码，禁止任意 URL 代理。
+- `GET /api/plans/:id/resource-image?entityId=...&v=<实体指纹>&image=<图片缓存键>`：按规划授权后代理已确认图片，检查域名、大小和真实解码，禁止任意 URL 代理。image 为64位十六进制缓存键，更换图片会改变地址；传入旧图片键返回404。兼容旧请求缺少v/image，但新客户端消费服务端生成的完整URL。保持 `private, no-store`，前端持久缓存由按用户隔离的IndexedDB负责。
 - 开启联网才向 Mastra 注册 `search_web`，每轮至多3次、每次最多5条、12秒超时。返回标题、链接、摘要、获取时间与真实提供方 DeepSeek/Tavily；未提供摘要时为空串并在界面说明；外部资料作为不可信参考，不改变工具权限。
 
 ## AGENTS.md 偏好
@@ -142,3 +142,5 @@ API 侧再由 `requireAdmin` 二次校验。
 - 后端：Nitro storage（L1）→ SQLite `cache` 表（L2，`expires_at` 校验）→ 未命中才请求百度并回写
 - 后端缓存默认 512 MiB，`CACHE_MAX_BYTES` 可调整，启动/定时维护分批淘汰过期与超额记录；单批有界，容量在多批中回落。后台容量统计不读取图片正文。
 - 前端：`app/utils/idb.ts` 按用户缓存图片与规划详情，48 MiB / 300 条上限、TTL 与最近访问索引；相同 URL 请求合并，最后一个订阅者取消才中止请求。规划快照先展示再向服务端校验；网络故障时显示只读离线状态，401 / 403 / 404 不降级展示旧缓存。当前规划 POI 本地检索不使用百度缓存。
+- 图片默认7天；图片按钮“重试”删除该URL的IndexedDB记录并使用HTTP reload，普通刷新不强制绕过缓存。新下载必须为非空且不超过8 MiB的PNG/JPEG/WebP，浏览器支持createImageBitmap时解码成功才缓存。
+- 服务端公开推荐图按城市/名称/地址/类型及实际启用来源复用最终选图（1天），按来源URL缓存已解码字节（7天），并合并同图并发下载，最多12个独立下载任务。腾讯搜索命中1天、空结果10分钟，错误不作为空结果缓存。详见 [IMAGE_CACHE](IMAGE_CACHE.md)。

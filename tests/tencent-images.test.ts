@@ -3,11 +3,12 @@ import { createServer } from 'node:http'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { imageFailure } from '../server/providers/media-errors'
 const stored = vi.hoisted(() => new Map<string, unknown>())
-vi.mock('../server/services/cache', () => ({ getCachedJson: async (key: string) => stored.get(key), setCachedJson: async (key: string, value: unknown) => { stored.set(key, value) } }))
+const ttls = vi.hoisted(() => [] as number[])
+vi.mock('../server/services/cache', () => ({ getCachedJson: async (key: string) => stored.get(key), setCachedJson: async (key: string, value: unknown, ttl: number) => { stored.set(key, value); ttls.push(ttl) } }))
 let api: typeof import('../server/providers/tencent-images')
 const record = { title: '太原晋祠实拍', siteName: '来源站点', siteUrl: 'https://example.org/travel', thumbnailUrl: 'https://img01.sogoucdn.com/image.jpg' }
 beforeEach(async () => {
-  vi.resetModules(); stored.clear()
+  vi.resetModules(); stored.clear(); ttls.length = 0
   vi.stubEnv('MEDIA_IMAGE_SEARCH', 'tencent'); vi.stubEnv('MEDIA_IMAGE_SEARCH_HOURLY_LIMIT', '60')
   vi.stubEnv('TENCENTCLOUD_SECRET_ID', 'fixture-id'); vi.stubEnv('TENCENTCLOUD_SECRET_KEY', 'fixture-secret')
   api = await import('../server/providers/tencent-images')
@@ -26,6 +27,7 @@ it('验证 SDK 请求配置、Images 字符串数组与缓存合并', async () =
   expect(one).toEqual([record]); expect(two).toEqual(one)
   await api.searchTencentImages('太原 晋祠 实景')
   expect(request).toHaveBeenCalledTimes(1)
+  expect(ttls).toEqual([86400])
 })
 it('空结果也缓存，重试不重复计费；进程小时额度耗尽阻止新查询', async () => {
   vi.stubEnv('MEDIA_IMAGE_SEARCH_HOURLY_LIMIT', '1')
@@ -34,6 +36,7 @@ it('空结果也缓存，重试不重复计费；进程小时额度耗尽阻止�
   expect(await api.searchTencentImages('无图片')).toEqual([])
   await expect(api.searchTencentImages('另一查询')).rejects.toMatchObject({ statusCode: 429 })
   expect(request).toHaveBeenCalledTimes(1)
+  expect(ttls).toEqual([600])
 })
 it('未开通/无效密钥与限流有明确分类，异常不污染查询缓存', async () => {
   const request = vi.spyOn(wimgs.v20251106.Client.prototype, 'request').mockRejectedValue({ code: 'AuthFailure.SecretIdNotFound', message: 'private secret detail' })

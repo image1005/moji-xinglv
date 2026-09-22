@@ -10,6 +10,7 @@ const active = ref(false)
 const visible = ref(false)
 const retryKey = ref(0)
 let observer: IntersectionObserver | null = null
+let handledRetry = 0
 
 function observe() {
   observer?.disconnect()
@@ -39,8 +40,10 @@ watch(
     objectUrl.value = ''
     state.value = src ? 'loading' : 'error'
     if (!src) return
+    const refresh = retryKey.value !== handledRetry
+    handledRetry = retryKey.value
     try {
-      const blob = await fetchBlobCached(src, undefined, controller.signal)
+      const blob = await fetchBlobCached(src, undefined, controller.signal, refresh)
       if (!requestActive) return
       ownedUrl = URL.createObjectURL(blob)
       objectUrl.value = ownedUrl

@@ -120,8 +120,28 @@ try {
   const resources = await enrichPlanResources('owner', oldPlan.id, snapshot.row.revision)
   assert.ok(resources.resources.some(resource => resource.image && resource.location && resource.status === 'ready'))
   const resource = resources.resources.find(item => item.image)!
-  assert.match(resource.image!.url, /&v=[a-z0-9]+$/)
+  assert.match(resource.image!.url, /&v=[a-z0-9]+&image=[a-f0-9]{64}$/)
   assert.ok((await readPlanResourceImage('owner', oldPlan.id, resource.entityId)).byteLength > 0)
+  const initialRow = db.select().from(schema.planResources).where(eq(schema.planResources.entityId, resource.entityId)).get()!
+  const imageCacheKey = initialRow.imageCacheKey!
+  const binaryRow = db.select().from(schema.cache).where(eq(schema.cache.key, `bin:${imageCacheKey}`)).get()!
+  assert(binaryRow.expiresAt.getTime() > Date.now() + 6 * 86400_000, 'Server image TTL is seven days')
+  storage.clear()
+  const originalProviderFetch = globalThis.fetch
+  globalThis.fetch = Object.assign(async () => { throw new Error('No network allowed during persistent-cache check') }, { preconnect: originalProviderFetch.preconnect }) as typeof fetch
+  try {
+    assert.deepEqual(await readPlanResourceImage('owner', oldPlan.id, resource.entityId, initialRow.fingerprint, imageCacheKey), Buffer.from(binaryRow.value), 'Cold L1 must refill from SQLite without downloading')
+    await assert.rejects(() => readPlanResourceImage('other', oldPlan.id, resource.entityId, initialRow.fingerprint, imageCacheKey), /规划不存在/, 'Cache hit cannot bypass ownership')
+    const newKey = 'a'.repeat(64)
+    db.update(schema.planResources).set({ imageCacheKey: newKey }).where(eq(schema.planResources.id, initialRow.id)).run()
+    const changed = (await getPlanResources('owner', oldPlan.id)).resources.find(item => item.entityId === resource.entityId)!
+    assert.notEqual(changed.image!.url, resource.image!.url, 'Replacing image changes frontend cache identity without a plan revision')
+    await assert.rejects(() => readPlanResourceImage('owner', oldPlan.id, resource.entityId, initialRow.fingerprint, imageCacheKey), /暂不可用/, 'Old image identity cannot read replacement')
+  } finally {
+    globalThis.fetch = originalProviderFetch
+    db.update(schema.planResources).set({ imageCacheKey }).where(eq(schema.planResources.id, initialRow.id)).run()
+  }
+  console.log(JSON.stringify({ mode: 'isolated-image-cache', passed: ['seven-day-ttl', 'sqlite-cold-read-no-network', 'cache-hit-ownership', 'replacement-url-version', 'stale-image-rejection'] }))
   await assert.rejects(() => readPlanResourceImage('owner', oldPlan.id, resource.entityId, 'staleidentity'), /暂不可用/)
   await assert.rejects(() => getPlanResources('other', oldPlan.id), /规划不存在/)
   await assert.rejects(() => readPlanResourceImage('other', oldPlan.id, resource.entityId), /规划不存在/)

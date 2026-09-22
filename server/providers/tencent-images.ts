@@ -18,7 +18,7 @@ export function tencentImageSearchEnabled() {
 const inflight = new Map<string, Promise<SearchImage[]>>()
 let window = 0, requests = 0
 
-/** One billable request per normalized query; results including empty results stay cached for ten minutes. */
+/** Successful search results last one day; empty results only ten minutes to bound retry costs. */
 export async function searchTencentImages(query: string): Promise<SearchImage[]> {
   if (!tencentImageSearchEnabled()) return []
   if (!process.env.TENCENTCLOUD_SECRET_ID?.trim() || !process.env.TENCENTCLOUD_SECRET_KEY?.trim()) {
@@ -48,7 +48,7 @@ export async function searchTencentImages(query: string): Promise<SearchImage[]>
         malformed++; return []
       })
       if (payload.Images.length && malformed === payload.Images.length) throw new SyntaxError('Invalid image search records')
-      await setCachedJson(key, images, 600)
+      await setCachedJson(key, images, images.length ? 86400 : 600)
       return images
     } catch (error) {
       if (signal.aborted) throw signal.reason

@@ -1,5 +1,22 @@
 # 山海行笺：实际验证记录
 
+## 2026-09-22 前端与服务端图片缓存
+
+起点 `codex/travel-delivery/27be968`，工作区干净；用户确认图片7天、搜索命中1天。基线 `bun run check` 成功，35文件283测试，日志 `.verification/image-cache-baseline.log`。复用已有IndexedDB和Nitro/SQLite，新增选图复用与同图并发下载合并、图片身份缓存地址及坏缓存重试；无新增依赖、锁文件改动或数据库迁移，没有改写真实业务库/.env。缓存规则见 [IMAGE_CACHE](IMAGE_CACHE.md)。
+
+逐项执行发布检查的全部命令，均退出0（已通过的check不再重复运行）：
+
+| 命令 | 本轮实际结果 |
+| --- | --- |
+| `bun run check` | lint、Nuxt/脚本typecheck、36文件290测试、Knip全量/生产通过；`.verification/image-cache-check.log` |
+| `bun run verify:media` | 原20类断言及Bun SDK探针通过；新增5类缓存断言：7天TTL、清空L1后SQLite命中不访问外网、缓存命中仍校验权限、替换图片URL变化、旧图片键拒绝。`.verification/image-cache-integration.log` |
+| `bun run build` | 成功，沿用既有上游构建警告 |
+| `bun run test:integration` / `test:recovery` | 11项HTTP与5阶段中断恢复通过 |
+| `bun run test:browser` | 10阶段工作区/草稿/冲突/版本/移动端/换号隔离通过 |
+| `bun run test:product` | 6阶段通过；新增真实IndexedDB验证：刷新后图片HTTP计数不增加（Playwright路由禁用浏览器HTTP缓存），旧坏Blob注入后点击一次重试仅增加一个请求并恢复图片。图片资源HTTP计数写入报告 |
+
+后五个命令日志 `.verification/image-cache-release.log`；恢复报告 `.verification/recovery/2026-09-22T14-11-11-001Z/report.json`，浏览器 `.verification/browser/2026-09-22T14-11-14-547Z/report.json`，产品 `.verification/product/2026-09-22T14-11-36-207Z/report.json`。此次未重复调用真实付费服务；缓存逻辑使用真实浏览器/SQLite/图像解码与显式供应商夹具验证，不扩展先前腾讯云、百度等真实联调结论。
+
 ## 2026-09-21 PR 更新前同步主分支
 
 从已验证的 c2e04f9 合入 origin/main 的 b2fb1b7，保留移动抽屉优先聚焦关闭按钮及移除 Google Fonts 的上游修复，同时保留本分支品牌图标。移除浏览器测试对 Google Fonts 的豁免；未改动行程/聊天/媒体业务实现。

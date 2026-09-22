@@ -140,16 +140,32 @@ export async function idbSet<T>(key: string, payload: T, ttlSeconds: number): Pr
 interface BlobRequest { controller: AbortController; promise: Promise<Blob>; subscribers: number; settled: boolean }
 const blobRequests = new Map<string, BlobRequest>()
 
-async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, generation: number): Promise<Blob> {
+async function removeBlob(url: string, generation: number) {
+  const user = cacheUser
+  if (!user) return
+  await cacheReady
+  const key = `${encodeURIComponent(user)}:blob:${url}`
+  await transaction<null>((data, meta, done) => { data.delete(key); meta.delete(key); done(null) }, generation)
+}
+
+function isImage(blob: Blob) {
+  return blob.size > 0 && blob.size <= 8 * 1024 * 1024 && ['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)
+}
+
+async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, generation: number, refresh: boolean): Promise<Blob> {
   try {
     signal.throwIfAborted()
-    const cached = await idbGet<Blob>(`blob:${url}`).catch(() => null)
+    if (refresh) await removeBlob(url, generation).catch(() => {})
+    const cached = refresh ? null : await idbGet<Blob>(`blob:${url}`).catch(() => null)
     if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
     signal.throwIfAborted()
-    if (cached instanceof Blob) return cached
-    const response = await fetch(url, { credentials: 'same-origin', signal })
+    if (cached instanceof Blob && isImage(cached)) return cached
+    const response = await fetch(url, { credentials: 'same-origin', signal, ...(refresh ? { cache: 'reload' as const } : {}) })
     if (!response.ok) throw new Error(`加载失败：${response.status}`)
     const blob = await response.blob()
+    if (!isImage(blob)) throw new Error('图片格式或大小不受支持')
+    // A 200 response can still contain an HTML error or corrupt image. Never persist it.
+    if (typeof createImageBitmap === 'function') { const decoded = await createImageBitmap(blob); decoded.close() }
     if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
     signal.throwIfAborted()
     await idbSet(`blob:${url}`, blob, ttlSeconds).catch(() => {})
@@ -163,15 +179,15 @@ async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, ge
 }
 
 /** Cancelling one subscriber never cancels another; the last cancellation stops the fetch. */
-export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?: AbortSignal): Promise<Blob> {
+export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?: AbortSignal, refresh = false): Promise<Blob> {
   if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('已取消', 'AbortError'))
-  const key = `${cacheGeneration}:${url}`
+  const key = `${cacheGeneration}:${refresh ? 'reload' : 'cached'}:${url}`
   let job = blobRequests.get(key)
   if (!job) {
     const controller = new AbortController()
     job = { controller, promise: Promise.resolve(new Blob()), subscribers: 0, settled: false }
     const owned = job
-    job.promise = loadBlob(url, ttlSeconds, controller.signal, cacheGeneration).finally(() => {
+    job.promise = loadBlob(url, ttlSeconds, controller.signal, cacheGeneration, refresh).finally(() => {
       owned.settled = true
       if (blobRequests.get(key) === owned) blobRequests.delete(key)
     })
