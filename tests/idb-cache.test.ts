@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchBlobCached, fetchJsonCached, selectCacheEvictions, setCacheUser } from '../app/utils/idb'
+import { fetchBlobCached, selectCacheEvictions, setCacheUser } from '../app/utils/idb'
 
 beforeEach(async () => {
   vi.stubGlobal('window', {})
@@ -30,7 +30,7 @@ describe('缓存失败降级与身份隔离', () => {
     controller.abort()
     await rejected
     expect(networkSignal?.aborted).toBe(false)
-    const image = new Blob(['shared'])
+    const image = new Blob(['shared'], { type: 'image/png' })
     finish(image)
     expect(await second).toBe(image)
     expect(fetcher).toHaveBeenCalledTimes(1)
@@ -45,7 +45,7 @@ describe('缓存失败降级与身份隔离', () => {
       networkSignal = options.signal
       started()
       return await new Promise((_resolve, reject) => options.signal.addEventListener('abort', () => reject(new DOMException('已取消', 'AbortError'))))
-    }).mockResolvedValue({ ok: true, blob: async () => new Blob(['retry']) })
+    }).mockResolvedValue({ ok: true, blob: async () => new Blob(['retry'], { type: 'image/png' }) })
     vi.stubGlobal('fetch', fetcher)
     const controller = new AbortController()
     const first = fetchBlobCached('/api/cancel-shared', undefined, controller.signal)
@@ -76,12 +76,6 @@ describe('缓存失败降级与身份隔离', () => {
     expect(fetcher).toHaveBeenCalledTimes(1)
   })
 
-  it('IndexedDB 不可用时仍返回 JSON，包括 false 值', async () => {
-    await setCacheUser('user-a')
-    vi.stubGlobal('$fetch', vi.fn().mockResolvedValue(false))
-    expect(await fetchJsonCached('/api/example')).toBe(false)
-  })
-
   it('已取消的图片请求不发起网络调用', async () => {
     const fetcher = vi.fn()
     vi.stubGlobal('fetch', fetcher)
@@ -105,7 +99,28 @@ describe('缓存失败降级与身份隔离', () => {
     const result = expect(pending).rejects.toThrow('登录状态已变化')
     await started
     await setCacheUser(null)
-    finish(new Blob(['private']))
+    finish(new Blob(['private'], { type: 'image/png' }))
     await result
+  })
+  it('显式重试要求重新请求，普通加载不强制刷新浏览器缓存', async () => {
+    await setCacheUser('user-a')
+    const fetcher = vi.fn().mockResolvedValue({ ok: true, blob: async () => new Blob(['image'], { type: 'image/webp' }) })
+    vi.stubGlobal('fetch', fetcher)
+    await fetchBlobCached('/api/image')
+    expect(fetcher.mock.calls[0]![1].cache).toBeUndefined()
+    await fetchBlobCached('/api/image', undefined, undefined, true)
+    expect(fetcher.mock.calls[1]![1].cache).toBe('reload')
+  })
+  it('HTTP200的非图片、空内容及解码失败不能成为可用缓存', async () => {
+    await setCacheUser('user-a')
+    const fetcher = vi.fn().mockResolvedValueOnce({ ok: true, blob: async () => new Blob(['html'], { type: 'text/html' }) })
+      .mockResolvedValueOnce({ ok: true, blob: async () => new Blob([], { type: 'image/png' }) })
+      .mockResolvedValue({ ok: true, blob: async () => new Blob(['corrupt'], { type: 'image/png' }) })
+    vi.stubGlobal('fetch', fetcher)
+    await expect(fetchBlobCached('/api/bad-image')).rejects.toThrow('格式或大小')
+    await expect(fetchBlobCached('/api/bad-image')).rejects.toThrow('格式或大小')
+    vi.stubGlobal('createImageBitmap', vi.fn().mockRejectedValue(new Error('decode failed')))
+    await expect(fetchBlobCached('/api/bad-image')).rejects.toThrow('decode failed')
+    expect(fetcher).toHaveBeenCalledTimes(3)
   })
 })

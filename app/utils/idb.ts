@@ -2,7 +2,7 @@
 const DB_NAME = 'guofeng-travel'
 const STORE = 'kv'
 const META = 'metadata'
-export const CACHE_MAX_BYTES = 48 * 1024 * 1024
+const CACHE_MAX_BYTES = 48 * 1024 * 1024
 const MAX_ENTRIES = 300
 interface CacheMeta { key: string; expiresAt: number; lastAccess: number; bytes: number }
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -50,6 +50,7 @@ async function transaction<T>(run: (data: IDBObjectStore, meta: IDBObjectStore, 
   })
 }
 
+/** @internal Exported only for deterministic capacity/TTL policy tests; idbSet owns production use. */
 export function selectCacheEvictions(entries: CacheMeta[], now = Date.now(), maxBytes = CACHE_MAX_BYTES, maxEntries = MAX_ENTRIES): string[] {
   const ordered = [...entries].sort((a, b) => a.lastAccess - b.lastAccess)
   let bytes = ordered.reduce((total, entry) => total + entry.bytes, 0)
@@ -139,16 +140,32 @@ export async function idbSet<T>(key: string, payload: T, ttlSeconds: number): Pr
 interface BlobRequest { controller: AbortController; promise: Promise<Blob>; subscribers: number; settled: boolean }
 const blobRequests = new Map<string, BlobRequest>()
 
-async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, generation: number): Promise<Blob> {
+async function removeBlob(url: string, generation: number) {
+  const user = cacheUser
+  if (!user) return
+  await cacheReady
+  const key = `${encodeURIComponent(user)}:blob:${url}`
+  await transaction<null>((data, meta, done) => { data.delete(key); meta.delete(key); done(null) }, generation)
+}
+
+function isImage(blob: Blob) {
+  return blob.size > 0 && blob.size <= 8 * 1024 * 1024 && ['image/png', 'image/jpeg', 'image/webp'].includes(blob.type)
+}
+
+async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, generation: number, refresh: boolean): Promise<Blob> {
   try {
     signal.throwIfAborted()
-    const cached = await idbGet<Blob>(`blob:${url}`).catch(() => null)
+    if (refresh) await removeBlob(url, generation).catch(() => {})
+    const cached = refresh ? null : await idbGet<Blob>(`blob:${url}`).catch(() => null)
     if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
     signal.throwIfAborted()
-    if (cached instanceof Blob) return cached
-    const response = await fetch(url, { credentials: 'same-origin', signal })
+    if (cached instanceof Blob && isImage(cached)) return cached
+    const response = await fetch(url, { credentials: 'same-origin', signal, ...(refresh ? { cache: 'reload' as const } : {}) })
     if (!response.ok) throw new Error(`加载失败：${response.status}`)
     const blob = await response.blob()
+    if (!isImage(blob)) throw new Error('图片格式或大小不受支持')
+    // A 200 response can still contain an HTML error or corrupt image. Never persist it.
+    if (typeof createImageBitmap === 'function') { const decoded = await createImageBitmap(blob); decoded.close() }
     if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载图片')
     signal.throwIfAborted()
     await idbSet(`blob:${url}`, blob, ttlSeconds).catch(() => {})
@@ -162,15 +179,15 @@ async function loadBlob(url: string, ttlSeconds: number, signal: AbortSignal, ge
 }
 
 /** Cancelling one subscriber never cancels another; the last cancellation stops the fetch. */
-export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?: AbortSignal): Promise<Blob> {
+export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?: AbortSignal, refresh = false): Promise<Blob> {
   if (signal?.aborted) return Promise.reject(signal.reason ?? new DOMException('已取消', 'AbortError'))
-  const key = `${cacheGeneration}:${url}`
+  const key = `${cacheGeneration}:${refresh ? 'reload' : 'cached'}:${url}`
   let job = blobRequests.get(key)
   if (!job) {
     const controller = new AbortController()
     job = { controller, promise: Promise.resolve(new Blob()), subscribers: 0, settled: false }
     const owned = job
-    job.promise = loadBlob(url, ttlSeconds, controller.signal, cacheGeneration).finally(() => {
+    job.promise = loadBlob(url, ttlSeconds, controller.signal, cacheGeneration, refresh).finally(() => {
       owned.settled = true
       if (blobRequests.get(key) === owned) blobRequests.delete(key)
     })
@@ -195,17 +212,4 @@ export function fetchBlobCached(url: string, ttlSeconds = 7 * 24 * 3600, signal?
     signal?.addEventListener('abort', abort, { once: true })
     shared.promise.then((blob) => { if (release()) resolve(blob) }, (error: unknown) => { if (release()) reject(error) })
   })
-}
-
-export async function fetchJsonCached<T>(url: string, ttlSeconds = 3600): Promise<T> {
-  const generation = cacheGeneration
-  const key = `json:${url}`
-  const cached = await idbGet<T>(key).catch(() => null)
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载数据')
-  if (cached !== null) return cached
-  const data = await $fetch(url) as T
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载数据')
-  await idbSet(key, data, ttlSeconds).catch(() => {})
-  if (generation !== cacheGeneration) throw new Error('登录状态已变化，请重新加载数据')
-  return data
 }

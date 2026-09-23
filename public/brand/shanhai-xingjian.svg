@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <title>山海行笺：一笺山水，一路朱砂</title>
+  <path d="M27 11H91L108 29V103C108 112 102 117 94 117H30C21 117 16 111 16 103V24C16 16 20 11 27 11Z" fill="#F5F0E5" stroke="#283C36" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M90 12V30H107" stroke="#283C36" stroke-width="5" stroke-linejoin="round"/>
+  <circle cx="83" cy="48" r="9" fill="#AF4336"/>
+  <path d="M24 86L53 40L73 73L84 61L100 88" fill="#597F6B"/>
+  <path d="M24 87L53 41L74 76" stroke="#283C36" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M43 63L53 48L62 63L53 60L43 63Z" fill="#F5F0E5"/>
+  <path d="M26 96C41 89 48 104 64 96C80 88 88 95 98 94" stroke="#283C36" stroke-width="5" stroke-linecap="round"/>
+  <path d="M63 106C53 102 57 94 67 90C78 86 78 81 75 78" stroke="#AF4336" stroke-width="4" stroke-linecap="round"/>
+  <path d="M26 109H40" stroke="#597F6B" stroke-width="4" stroke-linecap="round"/>
+</svg>

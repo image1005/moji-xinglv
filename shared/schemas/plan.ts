@@ -9,6 +9,7 @@ const imageUrl = z.string().max(2048).refine(
 )
 
 export const SpotSchema = z.strictObject({
+  id: z.string().max(100).default(''),
   name: shortText.min(1),
   lng: z.number().min(-180).max(180).nullable().default(null),
   lat: z.number().min(-90).max(90).nullable().default(null),
@@ -71,6 +72,11 @@ export const PlanSchema = z.strictObject({
   foodJournal: z.array(FoodEntrySchema).max(300).default([]),
   checklist: z.array(ChecklistItemSchema).max(100).default([]),
 }).superRefine((plan, ctx) => {
+  const spotIds = new Set<string>()
+  plan.days.forEach((day, dayIndex) => day.spots.forEach((spot, index) => {
+    if (spot.id && spotIds.has(spot.id)) ctx.addIssue({ code: 'custom', message: '景点 ID 不可重复', path: ['days', dayIndex, 'spots', index, 'id'] })
+    if (spot.id) spotIds.add(spot.id)
+  }))
   for (const field of ['foodJournal', 'checklist'] as const) {
     const ids = new Set<string>()
     plan[field].forEach((entry, index) => {
@@ -81,7 +87,6 @@ export const PlanSchema = z.strictObject({
 })
 
 export type Spot = z.infer<typeof SpotSchema>
-export type Day = z.infer<typeof DaySchema>
 export type Budget = z.infer<typeof BudgetSchema>
 export type FoodEntry = z.infer<typeof FoodEntrySchema>
 export type Plan = z.infer<typeof PlanSchema>

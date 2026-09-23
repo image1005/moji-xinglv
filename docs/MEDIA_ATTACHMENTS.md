@@ -1,0 +1,51 @@
+# 图片、地点与附件
+
+2026-09-22 缓存补充：前后端图片7天，成功搜索和最终选图1天；跨工作区复用公开选图、同图并发下载合并，图片替换改变代理URL，本地坏缓存可单图重试恢复。具体容量、身份隔离和失效规则见 [IMAGE_CACHE](IMAGE_CACHE.md)，实际检查见 [VERIFICATION](VERIFICATION.md)。
+
+## 职责与数据来源
+
+`shared/schemas/attachment.ts`、`media.ts` 定义跨端运行时契约；`shared/utils/plan-entities.ts` 负责行程实体身份。服务端 `attachments` 管私有用户图片；`travel-images` 选择免费图库与腾讯云补充来源，`wikimedia`/`providers/tencent-images` 各管接口差异，`media-image` 统一受控图片下载/解码/缓存；`baidu` 管地点/地图供应商差异；`media` 聚合派生资源并做修订保护。它们不代替行程唯一写入事务。
+
+景点新增 `id`；历史 JSON 缺失时默认空串，`ensurePlanEntityIds` 按城市、名称、地址确定性补齐。读取不写数据库；首次正常写入与版本事务一同持久化。已有 ID 优先保留，结构化景点修改不能换 ID。无 ID 的唯一旧身份可匹配恢复，无法唯一确认时分配新 ID。数组下标仅用于现有同步编辑操作，不作为异步资源写回身份。
+
+资源身份分为 `spot:<景点id>`、`food:<食记id>` 和城市内容标识，避免用户填写相同的景点/食记 ID 导致错关联。类型与位置资料计算 fingerprint；仅凭同 ID 不接受已改名/城市/地址的旧资源。食记沿用原 ID，城市按名称建立稳定关联。
+
+## 实图与定位
+
+- Wikimedia 按规范化精确标题、带城市消歧的百科检索、独立 Commons 图片索引依次查询。消歧页拒绝，搜索候选要求名称及城市证据，美食要求食品语义并过滤菜单票据、同名前缀的其它菜品。括号说明和组合名称只在检索中拆分，不改用户数据。Commons 必须有作者与许可；下载并用 sharp 完整解码后才展示。单实体共30秒、最多3次下载、有界查询和候选数，不能将网络错误缓存成无匹配。
+- 免费来源未命中时，按服务端配置调用腾讯云 WIMGS 一次，检索城市+名称+实景/美食。核验标题和目标地点，保留来源页及站点名；原作者/许可须查看来源页，不能伪造为开放许可。组合地点显示 matchedName。配置详见 [MEDIA_COVERAGE_FIX](MEDIA_COVERAGE_FIX.md)。
+- 图片仅从精确白名单 `upload.wikimedia.org` / `thumb.wikimedia.org` / `lizhicdn.search.qq.com` / `imgcdn.qq.com` 及 `img`+两位数字+`.sogoucdn.com` 的 HTTPS CDN 读取，拒绝重定向、凭据、非标准端口与任意原图站点。响应 5 MiB、2400 万像素限制，重新编码为 WebP。景点/城市为地点照片，食记为“菜品示意”，不代表指定餐厅实拍；附件与推荐图分开。
+- 图片代理 `GET /api/plans/:id/resource-image?entityId=...` 每次验证当前用户、规划、实体及 fingerprint。只有缓存命中也不能绕过权限。应用不猜测照片地址，不在生产混入生成图或测试图。
+- 百度地点检索按名称精确匹配、城市一致及地址包含匹配，仅一个候选才采用。城市通过地理编码取得城市/区县级位置；菜品不尝试伪定位。坐标记录 BD09LL、提供方、来源页面。缺 key、无确定候选时保持未定位。模型不能替代可信服务编造坐标。
+- 静态地图继续走既有服务端代理；前端可组合城市总览、每日标记、访问顺序连线。连线只是游览顺序，不是道路导航；资源坐标不偷偷改行程内容。
+
+`GET /api/plans/:id/resources` 返回当前 revision 和完整实体的状态；未处理条目为 pending，不触发外网。`POST` 输入 `{expectedRevision,entityId?}`：单项用于逐步加载/重试；不指定时最多处理 4 个 pending。每个请求最多并行 2 项，全局同时最多 6 项，相同用户/规划/修订/实体任务合并。
+
+任务完成时在同步事务中重新检查用户、规划 revision、实体 ID 和 fingerprint，任何后续编辑造成不符均拒绝写回。状态保存独立 `plan_resources`，不增加 revision 或行程版本。重试遇到失败或未取得新资源时，只保留同一 fingerprint 先前已确认的图片/位置并给出 error 提示；不跨改名或改城市继承资源。首次找不到匹配图显示 not_found，网络/解析失败显示 failed，不报告假成功。代理 URL 携带 fingerprint，实体改名后前端缓存键改变；旧 fingerprint 请求被拒绝，防止稳定 ID 下命中旧图片。图片与 JSON 复用既有服务端容量/TTL缓存，前端继续复用用户隔离的有界图片缓存和懒加载。
+
+## 多模态附件
+
+- `POST /api/attachments`：multipart 仅一个 file 与 planId。有界读取请求流后交平台 FormData 解析，不手写 multipart；文件最多 5 MiB，静态 JPEG/PNG/WebP，最长边 8192、总像素不超过 2400 万。服务端实际解码、旋转后重新编码 WebP、移除 EXIF。扩展名/MIME 不能代替内容检查。
+- 单条消息最多 4 张图片；用户总附件 200 MiB，未发送最多 20 张。上传授权绑定当前用户及规划。`GET /api/attachments/:id` 使用会话鉴权、private/no-store 与 nosniff；未发送附件可 DELETE，已被消息引用则拒绝单独删除。
+- 图片内容只存 SQLite `attachments.content` BLOB；聊天 JSONL、messages parts 和行程 JSON 只保存 ID/安全展示链接/元数据。`attachmentModelParts` 在模型边界重新核验归属，才读取字节并转为供应商需要的 data URL。当前消息、历史和追问均走同一路径。
+- `attachment_links` 记录每条消息引用；失败重试可复用上传 ID。删除原始消息后其它重试引用仍保留，避免误删；规划删除级联清理。最后一个引用删除后成为待清理附件，24 小时后维护任务回收。未发送附件同样 24 小时过期。不会通过清理附件修改行程版本。
+- 模型不支持视觉时明确拒绝含图上下文，不能静默丢弃。文字和图片单独发送均合法。历史图片合计独立预算：默认及最大 12 张、20 MiB，不计入 96 KB 文字预算；模型边界另有 32 MiB base64 总长度限制。超额明确提示拆分新会话，已存附件保留。
+
+## 迁移与验证
+
+迁移由 Drizzle 生成：0003 新增附件/资源/配置表与 messages.parts_json/chat_runs.configuration_json；0004 加多消息附件引用及删除原消息时保留复用字节；0005 为 Drizzle custom 数据迁移，回填先前 0003 附件已有 message_id。历史消息没有 parts_json 仍使用旧文本/工具/预览恢复路径。历史版本、兼容 panoramas 表均保留。
+
+运行迁移前按既有一致性备份流程备份，部署维护窗口执行 `bun run db:migrate`。不要将测试迁移或恢复脚本指向真实业务库。`bun run verify:media` 自动生成隔离临时库，先迁移到旧 0002、写入真实旧用户和缺 ID 行程，再迁移到 0003 写入存量已发送附件，最后升级到最新；验证用户/行程保留、附件 link 回填及维护不误删。
+
+2026-09-18 本次实际结果：
+
+- `verify:media` 通过 20 类断言：历史升级、附件回填、稳定 ID、图片解码、署名、资源/附件访问范围、资源缓存身份、部分失败保留、恶意媒体 URL 拒绝、资源不增加版本、过期任务拒绝、伪图片拒绝、模型边界二进制 parts、失败重试引用、孤儿回收、默认配置持久化/变更、搜索来源契约，以及真实 Mastra/AI SDK→本地模型的纯图工具往返。该路径发现并修复 Bun 无法 structuredClone(URL) 的真实错误，URL 与 Uint8Array 图片均完整保留。
+- 新增协议相邻单测 10/10 通过；其中实际随机 512×512 PNG 大于 96 KB，证实图片不误触文本限额；有界输入仍拒绝超大文字和过多图。
+- `bun run verify:media --real` 在临时库真实取得并解码[西湖照片](https://commons.wikimedia.org/wiki/File:West_Lake,_Hangzhou_2025.jpg)（Takashishin，CC BY 4.0）与[东坡肉照片](https://commons.wikimedia.org/wiki/File:BCfood12.JPG)（Archon6812，Public domain）。真实接口发现数值扩展元数据与新缩略图域，已修复并复验成功。
+- 真实百度坐标/地图与 Tavily 搜索尚待凭据联调；隔离夹具中的纯色测试图片、测试坐标、测试来源都有明确标记，不算真实产品图片或定位质量验证。
+
+实际覆盖受来源内容、标题证据及图片可下载性限制；小众景点、具体餐厅和自创菜名仍可能无可确认匹配图，此时保留占位及原因，不随意挑图。网络受限时可先使用文字行程并手工编辑，资源独立补齐。
+
+2026-09-21：修复工作区数据晚于图鉴组件就绪时未启动加载、手动继续遗漏已失败请求，以及未找到缓存使显式重试一小时内无效的问题。匹配缓存升级为 v2；仍保留1小时负缓存/1天身份缓存/7天图片缓存，显式重试缺图资源可重新查询。真实取得并解码苏州拙政园图片（King of Hearts，CC BY-SA 4.0）与东坡肉图片；`verify:media --real` 现在任一探针失败均返回非零退出码。
+
+同日后续覆盖修复：身份缓存升级 v3，独立保存 imageIssue 与 matchedName，都是兼容的资源 JSON 可选字段，无数据库迁移。旧缺图记录没有 imageIssue 时重新置为 pending 自动检查一次；新记录无匹配不无限重试。城市图进入图鉴。太原相关8项实际下载/解码通过，腾讯云未有凭据，结果和新增依赖验证见 [MEDIA_COVERAGE_FIX](MEDIA_COVERAGE_FIX.md)。

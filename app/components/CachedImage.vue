@@ -8,7 +8,9 @@ const state = ref<'loading' | 'ready' | 'error'>('loading')
 const container = ref<HTMLElement | null>(null)
 const active = ref(false)
 const visible = ref(false)
+const retryKey = ref(0)
 let observer: IntersectionObserver | null = null
+let handledRetry = 0
 
 function observe() {
   observer?.disconnect()
@@ -23,7 +25,7 @@ onDeactivated(() => { active.value = false; visible.value = false; observer?.dis
 onBeforeUnmount(() => observer?.disconnect())
 
 watch(
-  [() => props.src, () => user.value?.id, active, visible],
+  [() => props.src, () => user.value?.id, active, visible, retryKey],
   async ([src], _previous, onCleanup) => {
     if (!import.meta.client || !active.value || !visible.value) return
     const controller = new AbortController()
@@ -38,8 +40,10 @@ watch(
     objectUrl.value = ''
     state.value = src ? 'loading' : 'error'
     if (!src) return
+    const refresh = retryKey.value !== handledRetry
+    handledRetry = retryKey.value
     try {
-      const blob = await fetchBlobCached(src, undefined, controller.signal)
+      const blob = await fetchBlobCached(src, undefined, controller.signal, refresh)
       if (!requestActive) return
       ownedUrl = URL.createObjectURL(blob)
       objectUrl.value = ownedUrl
@@ -57,7 +61,7 @@ watch(
     <img v-if="state === 'ready' && objectUrl" :src="objectUrl" :alt="alt ?? ''" class="cached-image" decoding="async" @error="state = 'error'" >
     <div v-else class="cached-image cached-image--placeholder">
       <span v-if="state === 'loading'">{{ visible ? '墨迹加载中…' : '风景待展' }}</span>
-      <span v-else>暂无图像</span>
+      <span v-else>图像暂未加载 <button type="button" @click="retryKey++">重试</button></span>
     </div>
   </div>
 </template>
@@ -80,4 +84,5 @@ watch(
   letter-spacing: 0.1em;
   min-height: 60px;
 }
+.cached-image--placeholder button { border: 0; background: transparent; color: var(--bamboo); cursor: pointer; }
 </style>

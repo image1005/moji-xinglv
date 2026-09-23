@@ -86,7 +86,7 @@ async function run(config: ReturnType<typeof readConfig>) {
   const marker = `smoke-${crypto.randomUUID()}`
   const initialInput = {
     title: marker,
-    days: [{ city: '冒烟测试城', spots: [{ name: '待补坐标景点' }] }],
+    days: [{ city: '冒烟测试城', spots: [{ id: `${marker}-spot`, name: '待补坐标景点' }] }],
   }
   const initial = PlanSchema.parse(initialInput)
   const edited = PlanSchema.parse({

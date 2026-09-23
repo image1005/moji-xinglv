@@ -8,7 +8,7 @@ const MAX_LENGTH = 400
 
 class ActionableToolError extends Error {}
 
-export function sanitizeToolError(text: string): string {
+function sanitizeToolError(text: string): string {
   let clean = ''
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0
@@ -45,6 +45,18 @@ export function preserveActionableError(error: unknown): string | null {
 
 export function extractActionable(errorText: unknown): string | null {
   if (typeof errorText !== 'string') return null
+  // The SDK may serialize a MastraError (including cause) instead of a plain message.
+  // Extract only its message fields, never append serialized details to the UI error.
+  if (errorText.trimStart().startsWith('{')) {
+    try {
+      const visit = (value: unknown, depth: number): string | null => {
+        if (!value || typeof value !== 'object' || depth > 8) return null
+        const entry = value as { message?: unknown; cause?: unknown }
+        return visit(entry.cause, depth + 1) ?? (typeof entry.message === 'string' ? extractActionable(entry.message) : null)
+      }
+      return visit(JSON.parse(errorText), 0)
+    } catch { return null }
+  }
   const index = errorText.indexOf(ACTIONABLE_PREFIX)
   if (index < 0) return null
   const message = sanitizeToolError(errorText.slice(index + ACTIONABLE_PREFIX.length))

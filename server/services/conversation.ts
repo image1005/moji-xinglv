@@ -5,6 +5,7 @@ import { conversations, messages } from '../database/schema'
 import { db } from '../utils/db'
 import { getPlanRow } from './plan'
 import { finishPage, readPage } from './pagination'
+import { bindAttachments } from './attachments'
 
 /** 会话与消息持久化（硬约束 7） */
 
@@ -85,6 +86,7 @@ function toMessageRecord(r: typeof messages.$inferSelect): MessageRecord {
     conversationId: r.conversationId,
     role: r.role as MessageRole,
     content: r.content,
+    parts: (r.partsJson ?? undefined) as MessageRecord['parts'],
     toolCalls: r.toolCalls ?? undefined,
     preview: (r.previewJson ?? null) as PlanPreview | null,
     planVersion: r.planVersionId ?? null,
@@ -111,10 +113,12 @@ export async function appendMessage(
     toolCalls?: unknown
     preview?: PlanPreview | null
     planVersionId?: number | null
+    parts?: MessageRecord['parts']
+    attachmentOwner?: { userId: string; planId: number; ids: string[] }
   },
 ) {
-  const [row] = await db
-    .insert(messages)
+  const row = db.transaction(tx => {
+    const row = tx.insert(messages)
     .values({
       conversationId,
       role: data.role,
@@ -122,8 +126,12 @@ export async function appendMessage(
       toolCalls: (data.toolCalls ?? null) as never,
       previewJson: (data.preview ?? null) as never,
       planVersionId: data.planVersionId ?? null,
+      partsJson: data.parts ?? null,
     })
-    .returning()
+    .returning().get()
+    if (data.attachmentOwner) bindAttachments(tx, data.attachmentOwner.ids, row.id, data.attachmentOwner.userId, data.attachmentOwner.planId)
+    return row
+  })
   await touchConversation(conversationId)
-  return row!
+  return row
 }

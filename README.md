@@ -36,6 +36,16 @@
 
 ## 功能特性
 
+2026-09-18 渐进式交付的模块、迁移和逐项验证见 [工程交付](docs/DELIVERY.md)、[清理清单](docs/CLEANUP_REPORT.md) 与 [JSONL 协议](docs/JSONL.md)。保留 Nuxt、Bun、SQLite 和既有行程数据。
+
+**图文旅行规划**
+
+- 输入文字，或选择、拖拽、粘贴图片；上传支持预览、移除、进度及失败重试，纯图片也可发送，刷新后恢复附件和后续追问。
+- 联网开关与关闭／轻量／标准／深度思考独立配置，按模型真实能力禁用不支持项，默认设置和每轮快照持久化；联网支持 DeepSeek 官方搜索或独立 Tavily 工具，明确展示来源。
+- DeepSeek 官方模型支持情况以官方文档与真实请求验证为依据，兼容网关采用保守能力配置，不静默丢弃图片或伪装思考深度。
+- 行程和预览展示摘要、每日安排、城市图、景点图、美食图与多城市地图。免费 Wikimedia 来源未命中时，可接入腾讯云联网文搜图补充，图片实际下载解码并保留来源；地图使用可信 BD09 坐标，未知地点保留待定位。配置与覆盖边界见 [图片修复说明](docs/MEDIA_COVERAGE_FIX.md)。
+- 应用聊天收发为版本化 JSONL，文件独立上传；AI SDK 管理聊天消息与状态，Mastra 负责工具编排。
+
 **工作区工作台**
 
 - 左栏为可折叠的工作区文件夹（工作区 = 规划），支持搜索、按更新时间 / 创建时间排序、新建与删除
@@ -69,11 +79,12 @@
 
 **百度代理与双层缓存**
 
-- 百度能力仅服务端代理静态图 `staticimage/v2`（含标记与每日顺序连线）+ 街景 `panorama/v2`，AK 不进前端
-- 顺序连线不是道路导航，不提供导航路线或预计用时；POI 只在当前规划已有景点中本地检索，不调用在线搜索
+- 百度地图影像由服务端代理静态图 `staticimage/v2`（含标记与每日顺序连线）与街景 `panorama/v2`，地点服务同样仅在服务端访问，AK 不进前端
+- 顺序连线展示游览顺序，不提供道路导航或预计用时；原 search_poi 保留规划内检索，资源服务按城市、名称、地址调用百度在线地点接口消歧
 - 未知坐标保持 `null` 并提示人工补全；未配置地图 key 时友好提示，行程 / 美食 / 清单仍可编辑
 - 后端：Nitro storage（L1）+ SQLite `cache` 表（L2），`key = hash(api + params)`，校验 `expires_at`，按容量分批回收；历史 `panoramas` 表仅兼容保留
 - 前端：按用户隔离的 IndexedDB 缓存图片与规划快照，48 MiB / 300 条上限、TTL 和最近访问淘汰；离线快照只读
+- 推荐图片：前后端字节缓存7天，成功搜索/选图缓存1天；服务端同图并发下载合并，替换图片自动更换缓存地址，坏图重试清除对应本地缓存。见 [图片缓存说明](docs/IMAGE_CACHE.md)
 - 图片进入视口才加载，失活面板暂停；街景滑块防抖，同 URL 请求合并，单个订阅取消不影响其他组件
 - 响应头 `x-cache: HIT/MISS` 可直接验证缓存命中
 
@@ -128,13 +139,17 @@ bun dev
 | `bun run db:generate` | drizzle-kit 生成迁移 |
 | `bun run db:migrate` | 应用迁移（`server/database/migrate.ts`） |
 | `bun run db:seed` | 种子数据：admin 账号、示例规划、默认全局 AGENTS.md |
-| `bun run check` | 顺序执行 lint、typecheck、test |
+| `bun run check` | 顺序执行 lint、typecheck、test、Knip 全量与生产扫描 |
+| `bun run check:deadcode` | 生成 Nuxt 入口声明并检查生产与测试／工具引用 |
 | `bun run lint` / `bun run typecheck` / `bun run test` | ESLint / vue-tsc / Vitest |
 | `bunx vitest run <file> -t "<name>"` | 运行单个测试 |
 | `bun run smoke` | 隔离冒烟（别名 `bun run scripts/smoke.ts`；需先启动独立测试环境并显式配置凭据） |
 | `bun run test:integration` | 构建后自动创建临时数据库并执行 HTTP 验收 |
 | `bun run test:recovery` | 真实工具提交后强制终止独立服务并重启，验证恢复和幂等性 |
 | `bun run test:browser` | 构建后运行 Chromium + 本地模拟 AI 验收，报告在 `.verification/browser/` |
+| `bun run test:product` | 隔离生产构建图文流程：JSONL、图片上传、搜索／思考参数、资源、地图、刷新和权限；外部供应商使用明确标注的模拟 |
+| `bun run verify:media` | 临时数据库历史迁移、附件权限、稳定实体与资源写回验证 |
+| `bun run verify:providers --real` | 少量真实供应商能力探测，可能产生 API 用量；省略 --real 仅报告配置 |
 | `bun run check:release` | 依次执行代码检查、构建、HTTP、进程恢复及浏览器验收 |
 | `bun run eval:ai` | 固定样例的离线编辑契约评测，不调用外部模型 |
 | `bun run db:backup --source <数据库> --output <新备份文件>` | SQLite 一致性备份，拒绝覆盖已有文件 |
@@ -155,7 +170,10 @@ bun dev
 | `SMOKE_BASE` / `SMOKE_ALLOW_REMOTE` | 默认 `http://localhost:3000`；非 localhost/127.0.0.1 须显式设置 `SMOKE_ALLOW_REMOTE=true` |
 | `SMOKE_TIMEOUT_MS` | 每个请求（包括响应体）的超时，默认 15000ms，范围 1–120000 |
 | `DATABASE_URL` | SQLite 文件路径，形如 `file:./data/app.db` |
-| `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | OpenAI 兼容 LLM（默认 DeepSeek：`https://api.deepseek.com/v1` + `deepseek-chat`） |
+| `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` | DeepSeek 官方示例：`https://api.deepseek.com/v1` + `deepseek-flash`；旧 chat 别名按已验证实际模型规范化 |
+| `AI_PROVIDER` / `AI_SUPPORTS_VISION` | 自定义网关显式选择 DeepSeek provider；其他网关视觉须经部署者验证后开启 |
+| `AI_SEARCH_PROVIDER` | `auto`（默认）：优先 Tavily，否则使用官方 DeepSeek 密钥搜索；可显式指定 `deepseek`、`tavily` 或 `off` |
+| `TAVILY_API_KEY` | 可选的独立 Tavily 搜索；使用官方 DeepSeek 搜索时无需此配置 |
 | `AI_INPUT_MAX_BYTES` / `AI_OUTPUT_MAX_TOKENS` | 默认 96000 字节输入预算 / 4096 输出 token；输入预算包含规则、工具契约和工具结果 |
 | `AI_GLOBAL_CONCURRENCY` / `AI_USER_CONCURRENCY` | 默认同时生成 4 / 1 个任务 |
 | `AI_QUEUE_LIMIT` / `AI_QUEUE_WAIT_MS` | 默认队列 8 个、等待上限 10000ms |
@@ -244,8 +262,11 @@ CI 使用 dummy 配置与测试数据库，执行冻结锁文件安装、check�
 | --- | --- |
 | [docs/USER_MANUAL.md](docs/USER_MANUAL.md) | 面向用户与管理员的操作手册、实例、启动及排错说明 |
 | [docs/TECHNICAL_GUIDE.md](docs/TECHNICAL_GUIDE.md) | 按当前源码梳理的技术栈、架构、数据流与开发交接说明 |
-| [docs/VERIFICATION.md](docs/VERIFICATION.md) | 2026-09-16 本地检查结果、已知问题与文档／实现差异 |
-| [docs/OPTIMIZATION_IMPLEMENTATION.md](docs/OPTIMIZATION_IMPLEMENTATION.md) | 四套优化的实际实现、边界、配置与本轮验收记录 |
+| [docs/DELIVERY.md](docs/DELIVERY.md) | 2026-09-18 全部产品要求对应、模块职责、依赖选择、迁移和真实联调边界 |
+| [docs/VERIFICATION.md](docs/VERIFICATION.md) | 当前检查、浏览器和真实服务结果；早期记录单独标为历史 |
+| [docs/CLEANUP_REPORT.md](docs/CLEANUP_REPORT.md) | 清理前后逐项证据、生产/测试/动态入口与兼容退出条件 |
+| [docs/JSONL.md](docs/JSONL.md) | 应用协议、边界处理、幂等与恢复 |
+| [docs/OPTIMIZATION_IMPLEMENTATION.md](docs/OPTIMIZATION_IMPLEMENTATION.md) | 此前阶段的优化记录 |
 | [docs/PRD.md](docs/PRD.md) | 产品规格、数据模型、验收标准与决策记录 |
 | [docs/API.md](docs/API.md) | 接口清单、参数说明与缓存约定 |
 | [docs/DEV.md](docs/DEV.md) | 架构、数据流、编码约定与扩展指南 |

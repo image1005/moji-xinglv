@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { FoodEntrySchema, PlanSchema, SpotSchema } from '../shared/schemas/plan'
-import { CoordinateSchema, StaticMapQuerySchema, PanoramaQuerySchema } from '../shared/schemas/map'
-import { distanceKm, hasCoordinates, mapViewport, routeDistance, staticMapUrl } from '../shared/utils/routes'
+import { StaticMapQuerySchema, PanoramaQuerySchema } from '../shared/schemas/map'
+import { hasCoordinates, mapViewport, routeDistance, staticMapUrl } from '../shared/utils/routes'
 import { applyMergePatch } from '../shared/utils/merge-patch'
 
 const point = (lng: number, lat: number) => ({ ...SpotSchema.parse({ name: '地点', lng, lat }), lng, lat })
@@ -22,8 +22,8 @@ describe('兼容与旅行数据契约', () => {
   it('接受零经纬度，拒绝越界与非有限坐标', () => {
     expect(hasCoordinates(point(0, 0))).toBe(true)
     expect(hasCoordinates({ lng: Infinity, lat: 20 })).toBe(false)
-    expect(CoordinateSchema.safeParse('190,91').success).toBe(false)
-    expect(CoordinateSchema.safeParse('120.15,30.24').success).toBe(true)
+    expect(StaticMapQuerySchema.safeParse({ center: '190,91' }).success).toBe(false)
+    expect(StaticMapQuerySchema.safeParse({ center: '120.15,30.24' }).success).toBe(true)
   })
   it('禁止负预算与恶意图片协议', () => {
     expect(PlanSchema.safeParse({ title: 'a', budget: { total: -1 } }).success).toBe(false)
@@ -39,8 +39,8 @@ describe('路线与安全地图参数', () => {
   it('空点集没有虚构地图中心', () => { expect(mapViewport([])).toBeNull(); expect(staticMapUrl([])).toBe('') })
   it('相邻点直线距离和空点分段', () => {
     const a = point(120, 30), b = point(121, 30)
-    expect(distanceKm(a, a)).toBe(0)
-    expect(distanceKm(a, b)).toBeGreaterThan(90)
+    expect(routeDistance([a, a])).toBe(0)
+    expect(routeDistance([a, b])).toBeGreaterThan(90)
     expect(routeDistance([a, SpotSchema.parse({ name: '未知' }), b])).toBe(0)
   })
   it('跨城范围自动降低地图缩放', () => {

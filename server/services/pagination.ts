@@ -1,18 +1,18 @@
 import { createError } from 'h3'
 import { z } from 'zod'
 import type { Page, PageOptions } from '../../shared/types'
+import { PageOptionsSchema } from '../../shared/schemas/workspace'
 
-export const PageQuerySchema = z.object({
+export const PageQuerySchema = PageOptionsSchema.extend({
   paged: z.enum(['true', 'false']).optional().transform((value) => value === 'true'),
   limit: z.coerce.number().int().min(1).max(200).default(50),
-  cursor: z.string().min(1).max(2048).optional(),
 })
 
 const CursorSchema = z.object({ scope: z.string(), sort: z.number().int().min(0).max(8640000000000000), id: z.number().int().positive() })
 type Cursor = z.infer<typeof CursorSchema>
 
 export function readPage(options: PageOptions, scope: string) {
-  const limit = z.number().int().min(1).max(200).parse(options.limit ?? 50)
+  const limit = PageOptionsSchema.parse(options).limit ?? 50
   let cursor: Cursor | undefined
   if (options.cursor) {
     try {

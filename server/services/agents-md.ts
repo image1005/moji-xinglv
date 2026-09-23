@@ -20,17 +20,17 @@ const INJECTION_PATTERNS = [
   /<system>|<\/system>/gi,
 ]
 
-export function sanitizeAgentsMd(content: string): string {
+function sanitizeAgentsMd(content: string): string {
   let text = content.split(String.fromCharCode(0)).join('')
   for (const pattern of INJECTION_PATTERNS) text = text.replace(pattern, '[已过滤]')
   return text.slice(0, AGENTS_MD_MAX_LENGTH)
 }
 
-export function renderAgentsMd(template: string, vars: Record<string, string>): string {
+function renderAgentsMd(template: string, vars: Record<string, string>): string {
   return template.replace(/\{\{(\w+)\}\}/g, (raw, key: string) => vars[key] ?? raw)
 }
 
-export const DEFAULT_AGENTS_MD = '（系统默认：无额外偏好。请给出结构清晰、节奏从容的行程建议。）'
+const DEFAULT_AGENTS_MD = '（系统默认：无额外偏好。请给出结构清晰、节奏从容的行程建议。）'
 
 export async function resolveAgentsMd(
   userId: string,

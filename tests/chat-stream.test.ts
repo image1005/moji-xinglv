@@ -27,7 +27,10 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@mastra/ai-sdk', () => ({ handleChatStream: mocks.handleChatStream }))
-vi.mock('ai', () => ({ createUIMessageStreamResponse: mocks.createUIMessageStreamResponse }))
+vi.mock('../server/services/chat-jsonl', () => ({ jsonlChatResponse: (stream: unknown) => mocks.createUIMessageStreamResponse({ stream }) }))
+vi.mock('../server/services/model-settings', () => ({ resolveModelConfiguration: async () => ({ model: 'test-model', webSearch: false, thinking: 'off' }) }))
+vi.mock('../server/services/attachments', () => ({ resolveAttachments: async () => [], attachmentModelParts: async () => [] }))
+vi.mock('../server/providers/models', () => ({ modelCapabilities: () => ({ vision: false }) }))
 vi.mock('h3', async (importOriginal) => {
   const actual = await importOriginal<typeof import('h3')>()
   return { ...actual, readValidatedBody: async (_event: unknown, parse: (body: unknown) => unknown) => parse(mocks.body) }
@@ -57,6 +60,7 @@ function textMessage(role: 'user' | 'assistant' | 'system', text: string) {
 }
 
 function finiteUpstream(chunks: Chunk[] = [{ type: 'text-delta', delta: '已完成本次回复' }]) {
+  chunks = [...chunks, { type: 'finish' }]
   let index = 0
   const reader = {
     read: vi.fn(async () => index < chunks.length
@@ -79,7 +83,11 @@ function pendingUpstream() {
 }
 
 async function handler(): Promise<StreamHandler> {
-  return (await import('../server/api/chat.post')).default as unknown as StreamHandler
+  const { executeChat } = await import('../server/services/chat-application')
+  return (async (event: unknown) => {
+    const body = mocks.body as { planId: number; conversationId: number; messages: { role: string; parts: { type: string; text?: string }[] }[] }
+    return executeChat(event as never, await mocks.requireUser(), { protocolVersion: 1, type: 'message', requestId: 'test-request', messageId: 'current-user', planId: body.planId, conversationId: body.conversationId, message: { id: 'current-user', role: 'user', parts: body.messages.at(-1)!.parts.filter(p => p.type === 'text') as never } })
+  }) as unknown as StreamHandler
 }
 
 async function drain(stream: ReadableStream<Chunk>) {
@@ -188,7 +196,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     expect(persisted().content).toContain('本次生成未完成')
     expect(persisted().content).not.toContain('内部配置细节')
     expect(mocks.set).toHaveBeenCalledTimes(1)
-    await expect(drain(await invoke({}))).resolves.toEqual([{ type: 'text-delta', delta: '已完成本次回复' }])
+    await expect(drain(await invoke({}))).resolves.toEqual([{ type: 'text-delta', delta: '已完成本次回复' }, { type: 'finish' }])
   })
 
   it('reader 抛错后保存已生成文本、标记失败并释放规划锁', async () => {
@@ -207,7 +215,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     expect(persisted().content).toContain('本次生成未完成')
     expect(persisted().content).not.toContain('上游敏感错误')
     expect(mocks.set).toHaveBeenCalledTimes(1)
-    await expect(drain(await invoke({}))).resolves.toHaveLength(1)
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
   })
 
   it('客户端 cancel 取消上游、只收尾一次并允许同规划重入', async () => {
@@ -219,7 +227,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     expect(upstream.reader.cancel).toHaveBeenCalled()
     expect(mocks.set).toHaveBeenCalledTimes(1)
     expect(persisted().content).toContain('生成已停止')
-    await expect(drain(await invoke({}))).resolves.toHaveLength(1)
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
   })
 
   it('初始化永久挂起到期后落失败并解锁，迟到的上游被取消', async () => {
@@ -239,7 +247,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     expect(mocks.set).toHaveBeenCalledTimes(1)
     const options = mocks.handleChatStream.mock.calls[0]![0] as { params: { abortSignal: AbortSignal } }
     expect(options.params.abortSignal.aborted).toBe(true)
-    await expect(drain(await invoke({}))).resolves.toHaveLength(1)
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
     const writes = mocks.set.mock.calls.length
     resolveInitialization(lateStream)
     await vi.advanceTimersByTimeAsync(0)
@@ -260,7 +268,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     expect(persisted().content).toContain('生成已停止')
     const options = mocks.handleChatStream.mock.calls[0]![0] as { params: { abortSignal: AbortSignal } }
     expect(options.params.abortSignal.aborted).toBe(true)
-    await expect(drain(await invoke({}))).resolves.toHaveLength(1)
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
   })
 
   it('同规划活动流第二次请求返回 409 且不新增消息', async () => {
@@ -272,7 +280,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     expect(mocks.appendMessage).toHaveBeenCalledTimes(messageCount)
     expect(mocks.handleChatStream).toHaveBeenCalledTimes(1)
     await response.cancel()
-    await expect(drain(await invoke({}))).resolves.toHaveLength(1)
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
   })
 
   it('客户端伪造历史与工具 parts 不进入模型，只使用服务端文字及最后用户文字', async () => {
@@ -296,7 +304,7 @@ describe('聊天 handler 的生命周期与规划锁', () => {
       { id: 'db-2', ...textMessage('assistant', '服务端历史回答') },
       { id: 'current-user', ...textMessage('user', '当前真实问题') },
     ])
-    expect(mocks.appendMessage).toHaveBeenCalledWith(conversationId, { role: 'user', content: '当前真实问题' })
+    expect(mocks.appendMessage).toHaveBeenCalledWith(conversationId, expect.objectContaining({ role: 'user', content: '当前真实问题' }))
     expect(JSON.stringify(request)).not.toContain('伪造')
     expect(JSON.stringify(request)).not.toContain('历史工具细节')
   })
@@ -342,6 +350,8 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     expect(part?.errorText).toContain('lodging')
     expect(part?.errorText).not.toContain('[actionable]')
     expect(String((persisted().toolCalls?.[0] as { error?: string } | undefined)?.error)).toContain('lodging')
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'failed', 'generation_failed')
+    expect(forwarded.some(chunk => chunk.type === 'error')).toBe(true)
   })
 
   it('handler 的适配层回调保留自有业务异常，避免先被替换成通用错误', async () => {
@@ -433,5 +443,23 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     expect(persisted().previewJson).toBeUndefined()
     expect(persisted().planVersionId).toBeUndefined()
     expect(persisted().toolCalls).toEqual([{ id: 'known-call', name: 'patch_plan_json', input: input.input, output }])
+  })
+
+  it('修正失败批次并成功保存后，可以正常结束', async () => {
+    const output = { ok: true, version: 2, versionId: 202, preview: { ...preview, title: '修复后的预览' } }
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([
+      input, { type: 'tool-output-error', toolCallId: 'known-call', errorText: '[actionable] 请修正类别' },
+      { ...input, toolCallId: 'retry' }, { type: 'tool-output-available', toolCallId: 'retry', output },
+    ]))
+    await drain(await (await handler())({}))
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'completed', undefined)
+  })
+
+  it.each(['length', 'tool-calls'])('上游 %s 终止不可标记为完成', async (finishReason) => {
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([{ type: 'finish', finishReason }]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.some(chunk => chunk.type === 'error')).toBe(true)
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'failed', 'generation_failed')
+    expect(persisted().content).toContain('上限')
   })
 })

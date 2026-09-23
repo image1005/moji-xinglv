@@ -5,7 +5,7 @@ const planId = z.number().int().positive().describe('必填：当前工作区的
 const expectedVersion = z.number().int().nonnegative().optional()
   .describe('可选：最后读取的当前版本号。只有版本冲突时才需要 get_plan 重读。')
 const editValue = z.record(z.string(), z.unknown()).describe(
-  '当前目标对象的部分字段，保持字段类型：日程 meals 为字符串数组；食记 meal 只能是 breakfast/lunch/dinner/snack，status 只能是 wishlist/tasted，rating 是 0–5 整数。新增清单的 text 放在操作顶层，不能放进 value。',
+  '当前目标对象的部分字段，保持字段类型：景点 category 只能 sight/food/stay/transport（可省略，默认 sight），cost 为数字；日程 meals 为字符串数组；食记 meal 只能是 breakfast/lunch/dinner/snack，status 只能是 wishlist/tasted，rating 是 0–5 整数。新增清单的 text 放在操作顶层，不能放进 value。长行程每批最多两天，成功后继续下一批。',
 )
 const editOp = z.strictObject({
   target: z.enum(['plan', 'day', 'spot', 'food', 'checklist']),
@@ -21,6 +21,7 @@ const editOp = z.strictObject({
 
 /** 工具执行与聊天边界使用同一份入参契约，避免把框架校验结果误当作成功输出。 */
 export const PLAN_TOOL_INPUT_SCHEMAS = {
+  search_web: z.strictObject({ planId, query: z.string().trim().min(1).max(200) }),
   get_plan: z.strictObject({
     planId,
     section: z.enum(['all', 'overview', 'metadata', 'budget', 'tips', 'day', 'foodJournal', 'checklist']).optional(),

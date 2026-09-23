@@ -240,6 +240,8 @@ function amount(value: number) {
       <div><span class="itinerary__stat-label"><AppIcon name="wallet" :size="14" />旅程预算</span><strong class="itinerary__stat-budget">{{ detail.plan.budget.total ? amount(detail.plan.budget.total) : '待定' }}<small v-if="detail.plan.budget.total">{{ detail.plan.budget.currency }}</small></strong></div>
     </section>
 
+    <PlanMediaGallery v-if="detail.plan.days.length || detail.plan.foodJournal.length" :plan-id="detail.id" :revision="detail.revision" :plan="detail.plan" />
+
     <section v-if="checks.length" class="panel itinerary__review" aria-label="行程检查">
       <div class="section-title"><h2>行前核对</h2><button class="btn btn--ghost btn--small" @click="emit('editMap')">前往路线编辑</button></div>
       <ul><li v-for="(check, index) in checks" :key="`${check.code}:${index}`">{{ check.dayIndex === undefined ? '' : `第 ${check.dayIndex + 1} 日 · ` }}{{ check.message }}</li></ul>

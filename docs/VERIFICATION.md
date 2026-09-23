@@ -1,4 +1,103 @@
-# 山海行笺：本次检查记录
+# 山海行笺：实际验证记录
+
+## 2026-09-22 CI 登录恢复与导航展开竞态
+
+PR #2 的 [失败运行35739103301](https://github.com/image1005/moji-xinglv/actions/runs/35739103301) 对应761b220。Ubuntu CI的安装、check（290测试）、媒体验证、构建、HTTP和恢复全部成功；浏览器最后一次重新登录账号甲后，规划入口点击超时，日志显示目标处于 `collapse-shell collapsed`、展开按钮 `aria-expanded=false`。后续图文产品步骤因前步失败未执行，不能视为通过。
+
+`openWorkspace` 原先在异步读取规划/会话之后才展开导航：测试读取折叠状态后准备点击期间，登录自动恢复可能先将其展开，随后的切换点击又把它折叠；加载期间用户主动折叠也会被迟到恢复覆盖。现将展开及偏好保存放到读取前，完成时不再次覆写。浏览器导航助手先等待规划入口可用，再检查/展开目录并断言展开状态；保留正常点击，不使用force、增加固定等待、跳过断言或放宽超时。
+
+新增可控延迟的工作区回归，原实现失败（`.verification/ci-navigation-before.log`），修复后工作区28项测试全部通过。完整 `bun run check:release` 退出0：36文件291测试、lint/typecheck/Knip、隔离媒体、构建、11项HTTP、5阶段恢复、10阶段浏览器和6阶段图文产品流程全部通过。日志 `.verification/ci-navigation-release.log`；浏览器报告 `.verification/browser/2026-09-22T14-30-18-121Z/report.json`，产品报告 `.verification/product/2026-09-22T14-30-36-978Z/report.json`。所有数据库为临时库，没有新增依赖或迁移；Linux远程复验以修复提交的GitHub Actions结果为准。
+
+## 2026-09-22 前端与服务端图片缓存
+
+起点 `codex/travel-delivery/27be968`，工作区干净；用户确认图片7天、搜索命中1天。基线 `bun run check` 成功，35文件283测试，日志 `.verification/image-cache-baseline.log`。复用已有IndexedDB和Nitro/SQLite，新增选图复用与同图并发下载合并、图片身份缓存地址及坏缓存重试；无新增依赖、锁文件改动或数据库迁移，没有改写真实业务库/.env。缓存规则见 [IMAGE_CACHE](IMAGE_CACHE.md)。
+
+逐项执行发布检查的全部命令，均退出0（已通过的check不再重复运行）：
+
+| 命令 | 本轮实际结果 |
+| --- | --- |
+| `bun run check` | lint、Nuxt/脚本typecheck、36文件290测试、Knip全量/生产通过；`.verification/image-cache-check.log` |
+| `bun run verify:media` | 原20类断言及Bun SDK探针通过；新增5类缓存断言：7天TTL、清空L1后SQLite命中不访问外网、缓存命中仍校验权限、替换图片URL变化、旧图片键拒绝。`.verification/image-cache-integration.log` |
+| `bun run build` | 成功，沿用既有上游构建警告 |
+| `bun run test:integration` / `test:recovery` | 11项HTTP与5阶段中断恢复通过 |
+| `bun run test:browser` | 10阶段工作区/草稿/冲突/版本/移动端/换号隔离通过 |
+| `bun run test:product` | 6阶段通过；新增真实IndexedDB验证：刷新后图片HTTP计数不增加（Playwright路由禁用浏览器HTTP缓存），旧坏Blob注入后点击一次重试仅增加一个请求并恢复图片。图片资源HTTP计数写入报告 |
+
+后五个命令日志 `.verification/image-cache-release.log`；恢复报告 `.verification/recovery/2026-09-22T14-11-11-001Z/report.json`，浏览器 `.verification/browser/2026-09-22T14-11-14-547Z/report.json`，产品 `.verification/product/2026-09-22T14-11-36-207Z/report.json`。此次未重复调用真实付费服务；缓存逻辑使用真实浏览器/SQLite/图像解码与显式供应商夹具验证，不扩展先前腾讯云、百度等真实联调结论。
+
+## 2026-09-21 PR 更新前同步主分支
+
+从已验证的 c2e04f9 合入 origin/main 的 b2fb1b7，保留移动抽屉优先聚焦关闭按钮及移除 Google Fonts 的上游修复，同时保留本分支品牌图标。移除浏览器测试对 Google Fonts 的豁免；未改动行程/聊天/媒体业务实现。
+
+合并后完整重跑 `bun run check:release`，退出0：lint、Nuxt/脚本类型检查、35文件283测试、Knip全量和生产、20类媒体/迁移断言及Bun官方腾讯SDK本地验证、生产构建（43.5 MB / 14.4 MB gzip）、11项HTTP、5阶段恢复、10阶段浏览器与6阶段图文产品流程全部通过。没有重复调用付费外部服务，之前真实探针的验证边界保持不变。
+
+日志 `.verification/pr-update-release.log`；报告 `.verification/recovery/2026-09-21T08-37-53-103Z/report.json`、`.verification/browser/2026-09-21T08-37-55-743Z/report.json`、`.verification/product/2026-09-21T08-38-14-522Z/report.json`。全部数据库为隔离临时库。
+
+## 2026-09-21 图片覆盖与腾讯云补充来源
+
+起点 `codex/travel-delivery/0f52c4c`，初始工作区干净。原因、模块、腾讯云配置和验证边界见 [MEDIA_COVERAGE_FIX](MEDIA_COVERAGE_FIX.md)。本轮新增官方单产品腾讯云SDK及锁文件，无数据库迁移；未写真实业务库或修改.env。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `bun run check:release` | 整条发布检查退出0；lint、Nuxt/脚本typecheck、35文件283测试、Knip全量和生产检查均通过 |
+| `bun run verify:media`（发布检查内） | 原20类隔离断言通过；新增官方腾讯SDK在Bun 1.4.2下真实签名并请求loopback、解析响应通过 |
+| 生产构建 | 成功，43.5 MB / 14.4 MB gzip；本轮腾讯SDK前为42.6 MB / 14.2 MB gzip，服务端增加约0.9 MB / 0.2 MB gzip。客户端不引入SDK |
+| HTTP / 恢复 | 11项HTTP、5阶段强制中断和同库重启恢复通过 |
+| 浏览器 | 10阶段工作区、草稿、冲突、版本、移动视口及换号隔离通过，无未捕获UI异常 |
+| 图文产品流程 | 6阶段通过，含上传重试、纯图、搜索/思考、实字节图片和模拟地图、图片503重试、保存/刷新/带图追问、取消、跨用户跨工作区拒绝 |
+| `bun run verify:media --real --coverage` | Wikimedia 8项真实下载并解码通过，含带括号城市/别名、同名景点、组合景点与美食；来源和署名保留。腾讯加入前已验证此路径，之后仅提取共用下载模块 |
+| `bun run verify:media --real --tencent` | 退出1，明确返回configuration/not-verified。本机缺腾讯云凭据，未完成真实腾讯联调；不把隔离HTTP和测试图片当成线上结果 |
+
+日志：`.verification/tencent-images-release.log`、`.verification/tencent-images-unit.log`、`.verification/media-coverage-live.log`、`.verification/tencent-images-live.log`。浏览器报告：`.verification/browser/2026-09-21T08-13-22-403Z/report.json`；恢复：`.verification/recovery/2026-09-21T08-13-19-540Z/report.json`；图文产品：`.verification/product/2026-09-21T08-13-41-128Z/report.json`。腾讯适配测试运行官方SDK而非仿写签名；实际云端能力和账号授权仍待凭据验证。构建保留已有上游警告，未关闭规则或扩大Knip忽略范围。
+
+## 2026-09-21 联网、图片与落笔编排修复
+
+起点 `codex/travel-delivery/e9a982f`，干净工作区。故障证据、修复和使用方式见 [SEARCH_PLANNING_FIX](SEARCH_PLANNING_FIX.md)。无新增依赖或迁移，.env及真实业务数据未改写。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `bun run check` | lint、Nuxt与脚本typecheck、33文件261测试、Knip全量及生产扫描通过 |
+| `bun run verify:media` | 20类隔离协议、迁移、权限与版本断言通过 |
+| `bun run build` | 成功，42.6 MB / 14.1 MB gzip；保留既有上游警告 |
+| `bun run test:integration` / `test:recovery` | 11项HTTP集成、5阶段强制中断与恢复通过 |
+| `bun run test:browser` | 10阶段工作区、草稿、冲突、版本、移动视口及换号隔离通过，无UI异常 |
+| `bun run test:product` | 6阶段通过：上传重试/纯图/搜索深度、景点美食图/地图/图片503重试、编辑保存/恢复/带图追问/关闭搜索、取消/刷新、跨用户跨工作区拒绝 |
+| `bun run verify:planning --real --search` | 实际官方DeepSeek搜索10条来源；light配置，1天/4景点/1食记，一轮仅v2；工具错误0，finishReason=stop。临时数据库 |
+| `bun run verify:media --real` | 苏州拙政园、东坡肉均真实下载并解码，保留署名许可。临时数据库 |
+
+首次 `check:release` 在最后的 `test:product` 失败：旧脚本假定工作区一直展开，实际刷新/列表更新后已折叠，点击入口被导航遮挡。按已有 `test:browser` 的正常用户交互，先展开再点击，未使用 force click、跳过断言或调整产品导航。修复脚本后单独重跑 `test:product` 6阶段全部通过，再次 lint 与脚本typecheck通过；此前已经通过的构建和业务检查未重复执行。
+
+本机脱敏日志：`.verification/search-fix-release.log`（含上述首次脚本失败）、`.verification/search-fix-product.log`（最终成功）、`.verification/search-fix-live.log`（真实搜索/模型/事务）。浏览器报告：`.verification/browser/2026-09-21T07-21-34-630Z/report.json`；恢复报告：`.verification/recovery/2026-09-21T07-21-31-830Z/report.json`；最终产品报告：`.verification/product/2026-09-21T07-26-40-537Z/report.json`。
+
+浏览器供应商仍是显式隔离夹具；真实搜索和图片另外实际调用验证，不能把夹具地图当成真实百度定位。百度/Tavily凭据仍缺失，真实百度地图/定位及Tavily接口尚未联调。历史空参数调用没有原始供应商终止原因，未将其猜测为已证实的截断故障。
+
+## 2026-09-18 架构与图文产品交付
+
+目录 `E:\hbws\moji-xinglv-new\moji-xinglv-main`，实施分支 `codex/travel-delivery`。逐项产品核对和环境边界见 [DELIVERY](DELIVERY.md)，原始清理前结果见 [ARCHITECTURE_BASELINE](ARCHITECTURE_BASELINE.md)。所有 SQLite 验收均使用独立临时数据库，未迁移真实业务库。用户原有鉴权、侧栏和浏览器测试修改完整保留。
+
+| 验证 | 实际结果 |
+| --- | --- |
+| `bun run check` | 最终复核通过：lint、Nuxt与脚本typecheck、31文件250测试、Knip全量及生产扫描；日志 .verification/delivery/check.log |
+| `bun run build` | 生产构建通过，约42.6 MB / 14.1 MB gzip；相比基线新增服务端 sharp/libvips |
+| `bun run test:integration` | 11项HTTP断言通过：登录权限、真实行程内容、校验/冲突、版本分支/切换、系统消息和级联清理 |
+| `bun run test:recovery` | 5阶段通过：真实工具提交→强制终止自建服务→同库重启→已提交预览/任务中断恢复→重复ID拒绝和新轮可继续 |
+| `bun run test:browser` | 10阶段通过：双工作区/表单草稿、刷新、409比较应用、同工作区继续生成、版本切换、移动端焦点/视口、退出换号隔离；无未捕获UI异常 |
+| `bun run verify:media` | 旧0002→0003存量附件→0004/0005升级；20类断言通过，含历史保留、真实图片解码、附件多引用/清理/越权、稳定ID/修订写回/不建版本、缓存身份和部分失败保留、真实Mastra纯图两轮 |
+| DeepSeek真实探针 | 9请求，8成功合计1435 tokens；文字/视觉/工具/low-high-max/带reasoning的工具回传通过；思考+强制tool_choice为400，生产使用auto |
+| Wikimedia真实探针 | 西湖与东坡肉实图成功取得、完整解码，保留作者与许可；详见 [MEDIA_ATTACHMENTS](MEDIA_ATTACHMENTS.md) |
+| `bun run test:product` | 最终构建6阶段全通过：纯图上传失败重试→JSONL/搜索/思考max→景点食记图及每日地图/图片503重试→编辑保存/刷新恢复/历史图片追问/关闭搜索+low→浏览器取消与刷新→跨用户和工作区权限/伪图拒绝；无UI异常 |
+
+最终图文浏览器报告：`.verification/product/2026-09-18T14-02-39-225Z/report.json`。6次本地模型请求，5次带真实上传后的图片parts，1次模拟搜索、2次真实结构化行程提交；3次应用聊天均为JSONL且正文不含base64。截图 `illustrated-itinerary.png` 与 `restored-image-history.png` 已人工检查；截图中纯色图及来源文案明确属于隔离夹具。品牌16/32/64/128像素渲染已检查。
+
+最后的188份浏览器JS/HTML/CSS/JSON产物检查未包含已配置的服务端密钥，原auth测试与开始时副本逐字相同。`git diff --check` 通过；现有上游 Vue exports/Zod PURE 构建警告和 H3 statusMessage 长文案提示仍存在，未掩盖为新错误或删除测试规避。
+
+本机报告与日志在 `.verification/delivery`、`.verification/browser`、`.verification/recovery`、`.verification/product`；脚本可复现，CI保留浏览器截图和报告。CI使用显式本地模型/供应商夹具、fixture-only key与临时数据库，夹具图片/来源明确标为测试，不证明真实供应商可达性或识别准确率。尚无 Tavily/百度凭据，需配置相应key后真实联调；没有以假成功补齐报告。
+
+本轮发现并修复的实际故障包括：Windows Bun子进程PATH；Nuxt共享JSONL相对导入SSR打包；Bun structuredClone不能克隆Mastra图片URL；图片误计入文字预算；取消等待revision后仍提交；旧附件引用迁移；稳定实体改名的浏览器缓存错图；第13个派生资源未自动加载。对应测试验证可观察业务结果，不以mock调用次数替代持久化检查。
+
+## 以下为历史记录（截至2026-09-16，不代表当前实现）
+
+下文保留当时证据和修复过程，其中旧架构、测试数量、权限及功能限制已被上方本次记录和现行使用／技术文档替代。
 
 日期：2026-09-16。检查目录：`E:\hbws\moji-xinglv-new\moji-xinglv-main`。目标：理解当前项目并编写 [使用手册](USER_MANUAL.md) 与 [技术实现说明](TECHNICAL_GUIDE.md)。
 

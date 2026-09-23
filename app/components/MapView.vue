@@ -15,7 +15,15 @@ const saving = ref(false)
 const feedback = ref('')
 const failure = ref('')
 const busy = computed(() => saving.value || loading.value)
-const days = computed(() => currentPlan.value?.plan.days ?? [])
+const resources = computed(() => {
+  const record = currentPlan.value && ws.planResources.records.value[currentPlan.value.id]
+  return record && record.revision === currentPlan.value?.revision ? record.resources : []
+})
+const days = computed(() => (currentPlan.value?.plan.days ?? []).map(day => ({ ...day, spots: day.spots.map(spot => {
+  const location = resources.value.find(item => item.entityId === `spot:${spot.id}`)?.location
+  return location ? { ...spot, lng: location.lng, lat: location.lat } : spot
+}) })))
+watch(() => currentPlan.value?.revision, () => { if (import.meta.client && currentPlan.value) void ws.planResources.load(currentPlan.value.id, currentPlan.value.revision) }, { immediate: true })
 const day = computed(() => days.value[dayIndex.value])
 const pageCount = computed(() => Math.max(1, Math.ceil((day.value?.spots.length ?? 0) / MAP_PAGE_SIZE)))
 const pageSpots = computed(() => (day.value?.spots ?? []).slice(page.value * MAP_PAGE_SIZE, (page.value + 1) * MAP_PAGE_SIZE)
@@ -45,7 +53,7 @@ const url = computed(() => {
 })
 
 type Snapshot = { planId: number; version: number; revision: number; plan: Plan }
-type Editor = Snapshot & { kind: 'spot' | 'day'; dayIndex: number; spotIndex: number | null }
+type Editor = Snapshot & { kind: 'spot' | 'day'; dayIndex: number; spotIndex: number | null; spotId?: string }
 const editor = shallowRef<Editor | null>(null)
 const spotForm = reactive({ name: '', time: '', address: '', notes: '', imageUrl: '', category: 'sight' as Spot['category'], lng: '', lat: '', cost: '0', durationMinutes: '60' })
 const dayForm = reactive({ date: '', city: '', transport: '', lodging: '', meals: '' })
@@ -93,10 +101,19 @@ function dayFields(day?: Plan['days'][number]) {
 function mergeEditor(plan: Plan) {
   const base = editor.value!
   const oldDay = base.plan.days[base.dayIndex]
-  const newDay = plan.days[base.dayIndex]
+  const position = locateEditor(plan, base)
+  const newDay = plan.days[position?.dayIndex ?? base.dayIndex]
   if (base.kind === 'day') return { day: mergeDraftFields(dayFields(oldDay), { ...dayForm }, dayFields(oldDay ? newDay : undefined), dayLabels), spot: null }
   const index = base.spotIndex
-  return { day: null, spot: mergeDraftFields(spotFields(index === null ? undefined : oldDay?.spots[index]), { ...spotForm }, spotFields(index === null ? undefined : newDay?.spots[index]), spotLabels) }
+  return { day: null, spot: mergeDraftFields(spotFields(index === null ? undefined : oldDay?.spots[index]), { ...spotForm }, spotFields(index === null ? undefined : newDay?.spots[position?.spotIndex ?? index]), spotLabels) }
+}
+function locateEditor(plan: Plan, base: Editor) {
+  if (!base.spotId) return null
+  for (const [dayIndex, day] of plan.days.entries()) {
+    const spotIndex = day.spots.findIndex(spot => spot.id === base.spotId)
+    if (spotIndex >= 0) return { dayIndex, spotIndex }
+  }
+  return null
 }
 async function compareLatest() {
   if (!editor.value || busy.value) return
@@ -111,8 +128,9 @@ function reapplyDraft() {
   const current = latest.value
   if (!base || !current) return
   const oldDay = base.plan.days[base.dayIndex]
-  const newDay = current.plan.days[base.dayIndex]
-  if (oldDay && (!newDay || oldDay.date !== newDay.date || oldDay.city !== newDay.city)
+  const position = locateEditor(current.plan, base)
+  const newDay = current.plan.days[position?.dayIndex ?? base.dayIndex]
+  if (base.spotId ? !position : oldDay && (!newDay || oldDay.date !== newDay.date || oldDay.city !== newDay.city)
     || base.kind === 'spot' && base.spotIndex !== null && oldDay?.spots[base.spotIndex]?.name !== newDay?.spots[base.spotIndex]?.name) {
     failure.value = '原日期或地点的名称、顺序已变化，无法安全定位。草稿已保留，请先核对行程后手工重新选择目标。'
     return
@@ -120,7 +138,7 @@ function reapplyDraft() {
   const result = mergeEditor(current.plan)
   if (result.day) Object.assign(dayForm, result.day.merged)
   if (result.spot) Object.assign(spotForm, result.spot.merged)
-  editor.value = { ...base, plan: PlanSchema.parse(current.plan), version: current.version, revision: current.revision, dayIndex: !oldDay && base.kind === 'day' ? current.plan.days.length : base.dayIndex }
+  editor.value = { ...base, plan: PlanSchema.parse(current.plan), version: current.version, revision: current.revision, dayIndex: position?.dayIndex ?? (!oldDay && base.kind === 'day' ? current.plan.days.length : base.dayIndex), spotIndex: position?.spotIndex ?? base.spotIndex }
   differences.value = null
   latest.value = null
   failure.value = ''
@@ -148,7 +166,7 @@ function openSpot(index: number | null = null) {
     category: spot?.category ?? 'sight', lng: spot?.lng == null ? '' : String(spot.lng), lat: spot?.lat == null ? '' : String(spot.lat),
     cost: String(spot?.cost ?? 0), durationMinutes: String(spot?.durationMinutes ?? 60),
   })
-  editor.value = { ...base, kind: 'spot', dayIndex: dayIndex.value, spotIndex: index }
+  editor.value = { ...base, kind: 'spot', dayIndex: dayIndex.value, spotIndex: index, spotId: spot?.id }
   clearNotice()
 }
 

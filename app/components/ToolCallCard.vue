@@ -15,6 +15,7 @@ const LABELS: Record<string, { label: string; icon: string }> = {
   patch_plan_json: { label: '斟酌细修', icon: 'doc' },
   get_panorama: { label: '采风街景', icon: 'mountain' },
   search_poi: { label: '循迹寻胜', icon: 'compass' },
+  search_web: { label: '联网搜索', icon: 'compass' },
 }
 
 const info = computed(() => LABELS[props.name] ?? { label: props.name, icon: 'spark' })

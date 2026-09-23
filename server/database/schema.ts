@@ -113,6 +113,7 @@ export const messages = sqliteTable(
     role: text('role').notNull(),
     content: text('content').notNull().default(''),
     toolCalls: text('tool_calls', { mode: 'json' }),
+    partsJson: text('parts_json', { mode: 'json' }),
     previewJson: text('preview_json', { mode: 'json' }),
     planVersionId: integer('plan_version_id'),
     createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
@@ -138,3 +139,39 @@ export const agentsMd = sqliteTable(
   },
   (t) => [uniqueIndex('agents_md_user_plan_uq').on(t.userId, t.planId)],
 )
+
+/** Private image bytes never enter messages, plan JSON, or logs. */
+export const attachments = sqliteTable('attachments', {
+  id: text('id').primaryKey(),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  planId: integer('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
+  messageId: integer('message_id').references(() => messages.id, { onDelete: 'set null' }),
+  filename: text('filename').notNull(), mediaType: text('media_type').notNull(),
+  size: integer('size').notNull(), width: integer('width').notNull(), height: integer('height').notNull(),
+  content: blob('content', { mode: 'buffer' }).notNull(),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
+}, t => [index('attachments_user_plan_idx').on(t.userId, t.planId), index('attachments_orphan_idx').on(t.messageId, t.createdAt)])
+
+/** A retry may reuse the same bytes; every persisted message retains its own reference. */
+export const attachmentLinks = sqliteTable('attachment_links', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  attachmentId: text('attachment_id').notNull().references(() => attachments.id, { onDelete: 'cascade' }),
+  messageId: integer('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+}, t => [uniqueIndex('attachment_links_message_uq').on(t.attachmentId, t.messageId), index('attachment_links_message_idx').on(t.messageId)])
+
+export const modelSettings = sqliteTable('model_settings', {
+  userId: text('user_id').primaryKey().references(() => user.id, { onDelete: 'cascade' }),
+  configurationJson: text('configuration_json', { mode: 'json' }).notNull(),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
+})
+
+/** Derived resources do not change plan revisions or create plan versions. */
+export const planResources = sqliteTable('plan_resources', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  userId: text('user_id').notNull().references(() => user.id, { onDelete: 'cascade' }),
+  planId: integer('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
+  entityId: text('entity_id').notNull(), fingerprint: text('fingerprint').notNull(),
+  planRevision: integer('plan_revision').notNull(), resourceJson: text('resource_json', { mode: 'json' }).notNull(),
+  imageOriginUrl: text('image_origin_url'), imageCacheKey: text('image_cache_key'),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
+}, t => [uniqueIndex('plan_resources_plan_entity_uq').on(t.planId, t.entityId), index('plan_resources_owner_idx').on(t.userId, t.planId)])

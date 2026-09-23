@@ -1,8 +1,7 @@
-import { authClient } from '~/utils/auth-client'
-
 export default defineNuxtRouteMiddleware(async (to) => {
-  const { data: session } = await authClient.useSession(useFetch)
-  if (!session.value) {
+  // Wait for the current server identity instead of a stale sign-out session cache.
+  const user = await useCurrentUser().loadMe(true)
+  if (!user) {
     return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
   }
 })
