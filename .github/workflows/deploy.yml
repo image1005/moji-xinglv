@@ -22,25 +22,27 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           password: ${{ secrets.SERVER_PASSWORD }}
           port: 22
+          timeout: 60s
+          command_timeout: 30m
           script_stop: true
           script: |
             echo "=== 开始自动化部署流程 ==="
             mkdir -p /opt/moji-xinglv/data
+            cd /opt/moji-xinglv
 
-            if [ -d "/opt/moji-xinglv/.git" ]; then
-              echo ">>> 拉取最新仓库代码..."
-              cd /opt/moji-xinglv
-              git fetch origin main
-              git reset --hard origin/main
-            else
-              echo ">>> 首次克隆项目仓库..."
-              git clone https://github.com/image1005/moji-xinglv.git /opt/moji-xinglv
-              cd /opt/moji-xinglv
+            if [ ! -d ".git" ]; then
+              echo ">>> 初始化 Git 仓库并拉取..."
+              git init
+              git remote add origin https://github.com/image1005/moji-xinglv.git || git remote set-url origin https://github.com/image1005/moji-xinglv.git
             fi
 
-            if [ ! -f "/opt/moji-xinglv/.env" ]; then
+            echo ">>> 拉取最新代码..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            if [ ! -f ".env" ]; then
               echo ">>> 生成默认 .env 配置文件..."
-              cp /opt/moji-xinglv/.env.example /opt/moji-xinglv/.env
+              cp .env.example .env
             fi
 
             echo ">>> 执行 Docker 构建与启动..."
@@ -48,6 +50,6 @@ jobs:
             docker compose up -d --build
 
             echo ">>> 检查容器运行状态..."
-            sleep 3
+            sleep 4
             docker ps --filter "name=moji-xinglv"
             echo "=== 部署流程已成功执行 ==="
