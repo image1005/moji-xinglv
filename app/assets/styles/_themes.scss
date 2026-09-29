@@ -61,6 +61,12 @@
   --thinking-bg: #f5f1e7;
   --thinking-border: #dfd5c2;
   --selection-bg: rgba(172, 77, 60, 0.18);
+
+  // 宣纸质感设计令牌 (Xuan Paper Texture Tokens)
+  --paper-texture-dot: radial-gradient(transparent 1px, rgba(0, 0, 0, 0.025) 1px);
+  --paper-texture-fiber: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.22'/%3E%3C/svg%3E");
+  --paper-texture-ambient: radial-gradient(50% 53% at 50% 100%, rgba(23, 23, 23, 0.08) 0%, transparent 100%);
+  --paper-texture-pattern: var(--paper-texture-dot), var(--paper-texture-fiber);
 }
 
 [data-theme="dark"] {
@@ -125,4 +131,10 @@
   --thinking-bg: #1b1e23;
   --thinking-border: #2b313a;
   --selection-bg: rgba(217, 72, 72, 0.3);
+
+  // 玄青夜墨纸张质感设计令牌 (Dark Paper Texture Tokens)
+  --paper-texture-dot: radial-gradient(transparent 1px, rgba(255, 255, 255, 0.015) 1px);
+  --paper-texture-fiber: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.08'/%3E%3C/svg%3E");
+  --paper-texture-ambient: radial-gradient(50% 53% at 50% 100%, rgba(255, 255, 255, 0.03) 0%, transparent 100%);
+  --paper-texture-pattern: var(--paper-texture-dot), var(--paper-texture-fiber);
 }

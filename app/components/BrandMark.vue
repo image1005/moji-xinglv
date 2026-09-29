@@ -3,7 +3,7 @@ withDefaults(defineProps<{ size?: number; decorative?: boolean }>(), { size: 40,
 </script>
 
 <template>
-  <img src="/brand/shanhai-xingjian.svg" :width="size" :height="size" :alt="decorative ? '' : '山海行笺'" :aria-hidden="decorative || undefined" class="brand-mark">
+  <img :src="'/brand/shanhai-xingjian.png?v=3'" :width="size" :height="size" :alt="decorative ? '' : '山海行笺'" :aria-hidden="decorative || undefined" class="brand-mark">
 </template>
 
 <style scoped>
