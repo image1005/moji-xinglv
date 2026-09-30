@@ -2,6 +2,7 @@ import { and, eq, isNull, lt, notExists, sql } from 'drizzle-orm'
 import { createError } from 'h3'
 import sharp from 'sharp'
 import { AttachmentSchema, ATTACHMENT_LIMITS, type Attachment } from '../../shared/schemas/attachment'
+import { randomUUID } from '../../shared/utils/random-id'
 import { attachmentLinks, attachments, conversations, messages, plans } from '../database/schema'
 import { db } from '../utils/db'
 
@@ -38,7 +39,7 @@ export async function createAttachment(userId: string, planId: number, filename:
     const pending = tx.select({ count: sql<number>`count(*)` }).from(attachments).where(and(eq(attachments.userId, userId), notExists(tx.select().from(attachmentLinks).where(eq(attachmentLinks.attachmentId, attachments.id))))).get()!.count
     if (pending >= 20 || quota.bytes + prepared.size > 200 * 1024 * 1024) throw createError({ statusCode: 413, statusMessage: '附件存储额度已满，请移除未发送的附件或旧工作区' })
     const safeName = Array.from(filename).filter(char => char.charCodeAt(0) >= 32 && char !== '<' && char !== '>').join('').slice(0, 200) || '旅行图片'
-    const row = tx.insert(attachments).values({ id: crypto.randomUUID(), userId, planId, filename: safeName, ...prepared }).returning().get()
+    const row = tx.insert(attachments).values({ id: randomUUID(), userId, planId, filename: safeName, ...prepared }).returning().get()
     return dto(row)
   })
 }

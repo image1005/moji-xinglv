@@ -1,5 +1,6 @@
 import { reactive, ref } from 'vue'
 import { ATTACHMENT_LIMITS, AttachmentSchema, type Attachment } from '#shared/schemas/attachment'
+import { randomUUID } from '#shared/utils/random-id'
 import { apiErrorMessage } from '~/utils/api'
 
 interface AttachmentDraft {
@@ -62,7 +63,7 @@ export function createAttachmentDrafts() {
         failure.value = '图片须为 JPEG、PNG 或 WebP，每张不超过 5 MiB'
         continue
       }
-      const entry = reactive<AttachmentDraft>({ key: crypto.randomUUID(), planId, file, preview: URL.createObjectURL(file), progress: 0, status: 'uploading', error: '' })
+      const entry = reactive<AttachmentDraft>({ key: randomUUID(), planId, file, preview: URL.createObjectURL(file), progress: 0, status: 'uploading', error: '' })
       entries.push(entry)
       void upload(entry)
     }

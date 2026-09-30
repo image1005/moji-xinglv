@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ChecklistItemSchema, PlanSchema, type Plan } from '#shared/schemas/plan'
+import { randomUUID } from '#shared/utils/random-id'
 import { apiErrorMessage } from '~/utils/api'
 
 const { currentPlan, savePlan, errorMessage, loading } = useWorkspace()
@@ -54,7 +55,7 @@ async function persist(base: Snapshot, message: string) {
 async function addItem() {
   const base = draft.value
   if (!base || busy.value) return
-  const result = ChecklistItemSchema.safeParse({ id: crypto.randomUUID(), text: text.value.trim(), done: false })
+  const result = ChecklistItemSchema.safeParse({ id: randomUUID(), text: text.value.trim(), done: false })
   if (!result.success) {
     failure.value = '请填写 1—200 字的待办事项。'
     return

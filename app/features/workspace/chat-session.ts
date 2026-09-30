@@ -2,6 +2,7 @@ import { ref, shallowRef, type Ref } from 'vue'
 import { Chat } from '@ai-sdk/vue'
 import type { Attachment } from '#shared/schemas/attachment'
 import { ModelConfigurationSchema, type ModelConfiguration } from '#shared/schemas/model-config'
+import { randomUUID } from '#shared/utils/random-id'
 import type { PlanDetail, ConversationItem } from '#shared/schemas/workspace'
 import { api, apiErrorMessage } from '~/utils/api'
 import { JsonlChatTransport } from '../../utils/chat-transport'
@@ -162,7 +163,7 @@ export function createWorkspaceChat(context: {
     if (attachments.length && !modelSettings.capabilities.value?.vision) throw new Error('当前模型不支持图片，请配置视觉模型后发送；图片仍保留。')
     const identity = JSON.stringify({ text: text.normalize('NFC').trim(), attachments: attachments.map(item => item.id), configuration: turnConfiguration })
     requestId = pendingSubmission?.conversationId === currentConversationId.value && pendingSubmission.identity === identity
-      ? pendingSubmission.requestId : crypto.randomUUID()
+      ? pendingSubmission.requestId : randomUUID()
     pendingSubmission = { conversationId: currentConversationId.value, identity, requestId }
     processingStatus.value = 'submitted'
     await instance.sendMessage({ parts: [

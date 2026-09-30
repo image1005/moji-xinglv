@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import { ChecklistItemSchema, DaySchema, FoodEntrySchema, formatPlanIssues, SpotSchema, type Plan } from '../schemas/plan'
 import { applyMergePatch } from './merge-patch'
+import { randomUUID } from './random-id'
 
 /**
  * 原子编辑操作：由 apply_plan_edits 工具与服务层共用。
@@ -115,7 +116,7 @@ export function applyPlanEditOps(plan: Plan, ops: readonly PlanEditOp[]): Plan {
       }
       case 'food': {
         if (op.action === 'add') {
-          next.foodJournal.push(parseValue(FoodEntrySchema, { id: crypto.randomUUID(), ...op.value }, label, '食记'))
+          next.foodJournal.push(parseValue(FoodEntrySchema, { id: randomUUID(), ...op.value }, label, '食记'))
           return
         }
         const index = next.foodJournal.findIndex((item) => item.id === op.id)
@@ -136,7 +137,7 @@ export function applyPlanEditOps(plan: Plan, ops: readonly PlanEditOp[]): Plan {
         if (op.action === 'add') {
           const text = (op.text ?? '').trim()
           if (!text) throw new PlanEditError(`${label}：新增清单条目需要操作顶层 text（与 target/action 同级，不要放进 value）`)
-          next.checklist.push(parseValue(ChecklistItemSchema, { id: crypto.randomUUID(), text, done: op.value?.done === true }, label, '清单'))
+          next.checklist.push(parseValue(ChecklistItemSchema, { id: randomUUID(), text, done: op.value?.done === true }, label, '清单'))
           return
         }
         const index = next.checklist.findIndex((item) => item.id === op.id)

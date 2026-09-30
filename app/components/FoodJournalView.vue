@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { FoodEntrySchema, PlanSchema, type FoodEntry, type Plan } from '#shared/schemas/plan'
+import { randomUUID } from '#shared/utils/random-id'
 import { api, apiErrorMessage, type PlanDetail } from '~/utils/api'
 import { isDraftForm, mergeDraftFields, type DraftDifference } from '~/utils/draft-merge'
 
@@ -140,7 +141,7 @@ async function submit() {
   const index = next.foodJournal.findIndex((item) => item.id === base.entryId)
   const result = FoodEntrySchema.safeParse({
     ...(index >= 0 ? next.foodJournal[index] : {}), ...form,
-    id: base.entryId ?? crypto.randomUUID(), name: form.name.trim(), restaurant: form.restaurant.trim(), city: form.city.trim(), address: form.address.trim(),
+    id: base.entryId ?? randomUUID(), name: form.name.trim(), restaurant: form.restaurant.trim(), city: form.city.trim(), address: form.address.trim(),
     cost: Number(form.cost), rating: Number(form.rating),
     tags: form.tags.split(/[,，、\n]/).map((item) => item.trim()).filter(Boolean).slice(0, 12),
   })
