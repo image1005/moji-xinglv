@@ -25,7 +25,7 @@ Nitro（Bun 运行时）
 2. **切换版本（Undo）**：校验当前 `expectedVersion`、`expectedRevision` 与会话归属 → 读取目标版本 → 设置当前规划快照与 `current_version_id`，递增 revision（**不新建版本**）→ 同事务插入系统消息与预览。
    历史永不删除；过期写入返回 409。切换后继续编辑会以 `max(version)+1` 追加版本、以当前版本为父，版本路线图据此分叉。
 3. **百度请求**：相同参数单飞去重 → `hashKey(api, params)` → Nitro storage → SQLite `cache` 表 → 未命中才带 AK 请求百度 → 回写。二进制 L1 使用可序列化 base64 与绝对过期时间，L2 命中回填剩余 TTL；前端再包一层按用户隔离的 IndexedDB。历史 `panoramas` 表保留兼容，但新图片统一使用 `cache`。
-   允许 `staticimage/v2`、`panorama/v2` 及资源补齐使用的 `place/v2/search`、`geocoding/v3`；按城市、名称、地址消歧。原 search_poi 仍只查规划。没有道路导航或浏览器地图 SDK。
+   允许 `staticimage/v2`、`panorama/v2` 及资源补齐使用的 `place/v2/search`、`geocoding/v3`；按城市、名称、地址消歧。原 search_poi 仍只查规划。城市舆图另用百度 JSAPI 4.0 与独立浏览器端 AK，支持拖动、缩放和地点联动；不提供道路导航。
 4. **生成与恢复**：先以 `(userId, requestId)` 在 `chat_runs` 去重、分配并发/队列名额，再追加用户/助手消息。工具结果和周期检查点落库，终态幂等收尾；重启将活动任务标记 interrupted。恢复只读取已有结果，明确新一轮才换 requestId。输入处理器每次模型调用都计算规则、工具、历史和工具结果的字节预算。
 
 ## 目录与关键文件
@@ -78,7 +78,7 @@ Nitro（Bun 运行时）
 - **数据扩展**：`foodJournal` / `checklist` 缺省 `[]`，条目 ID 各自唯一。`Spot.lng` / `lat` 缺省且未知时同时为 `null`；`address=''`、`category='sight'`、`durationMinutes=60`、`cost=0`。所有入口经同一 schema 归一化，旧 JSON 无需破坏性迁移。
 - **乐观锁**：保存、资料修改和切换应携带读取时的 `expectedVersion` / `expectedRevision`；同一事务校验并写入。revision 随有效修改前进，包括 AI 草稿检查点、正式提交、Markdown 资料变更及版本切换，不能由版本号代替。无变化保存也先检查已传值。409 保留草稿，比较后明确重新应用；旅行偏好独立发送 expectedVersion，不存在时为 0。版本改名独立使用 `expectedNameRevision`，不推进规划 revision。
 - **版本指针**：当前版本 = `plans.current_version_id`（为兼容历史数据，指针为空时回退到最新版本）。切换版本只改指针与规划快照；新版本编号取 `max(version)+1`，因此切换后继续编辑可能跳号并在路线图中分叉。
-- **地图边界**：只允许静态图与 panorama 服务端代理。POI 仅检索当前规划；未知坐标不生成地图请求、不由 AI 猜测。路线只是景点顺序连线，不是导航；无 key 提示降级，不阻断行程编辑。
+- **地图边界**：城市舆图使用百度 JSAPI 4.0；公开的 `NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK` 必须独立配置并限制 Referer，严禁复用服务端 AK。静态图、panorama、受控地点查询与地理编码继续走服务端代理。POI 仅检索当前规划；未知坐标不绘制标记、不由 AI 猜测。路线只是景点顺序连线，不是导航；浏览器 AK 缺失或 SDK 加载失败时保留静态预览与完整地点清单，不阻断行程编辑。
 - **密钥边界**：`BAIDU_MAP_AK` 只允许在 `server/services/baidu.ts` 读取；
   前端产物不得出现 AK / AUTH_SECRET / AI_API_KEY 的**值**。
 - **页面缓存（KeepAlive）**：`/` 与 `/admin` 通过 `definePageMeta({ keepalive: true })` 保留页面本地状态
