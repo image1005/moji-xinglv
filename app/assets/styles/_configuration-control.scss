@@ -1,0 +1,47 @@
+.configuration-control {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  max-width: 100%;
+  padding: 5px 9px;
+  border: 1px solid var(--border-secondary);
+  border-radius: 6px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+
+  &:hover:not(:disabled):not([aria-disabled="true"]) {
+    background: var(--bg-card-muted);
+    border-color: var(--border-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--bamboo);
+    outline-offset: 3px;
+  }
+
+  &--active {
+    background: var(--bamboo-soft);
+    border-color: var(--bamboo);
+    color: var(--bamboo);
+  }
+
+  &:disabled, &[aria-disabled="true"] {
+    color: var(--text-muted);
+    cursor: not-allowed;
+  }
+
+  &__value { color: var(--text-muted); font-size: 11px; }
+  &--active &__value { color: var(--bamboo); }
+}
+
+@media (pointer: coarse) {
+  .configuration-control { min-height: 40px; }
+}

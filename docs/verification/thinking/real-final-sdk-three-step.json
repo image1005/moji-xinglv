@@ -1,0 +1,56 @@
+{
+  "mode": "real-provider-sdk-mastra",
+  "passed": true,
+  "durationMs": 3222,
+  "configuration": {
+    "model": "deepseek-flash",
+    "thinking": "deep",
+    "webSearch": false
+  },
+  "calls": [
+    "get_nonce",
+    "confirm_nonce"
+  ],
+  "statuses": [
+    200,
+    200,
+    200
+  ],
+  "requests": [
+    {
+      "model": "deepseek-flash",
+      "thinking": {
+        "type": "enabled"
+      },
+      "effort": "max",
+      "maxTokens": 32768,
+      "reasoningLengths": []
+    },
+    {
+      "model": "deepseek-flash",
+      "thinking": {
+        "type": "enabled"
+      },
+      "effort": "max",
+      "maxTokens": 32768,
+      "reasoningLengths": [
+        273
+      ]
+    },
+    {
+      "model": "deepseek-flash",
+      "thinking": {
+        "type": "enabled"
+      },
+      "effort": "max",
+      "maxTokens": 32768,
+      "reasoningLengths": [
+        273,
+        111
+      ]
+    }
+  ],
+  "textChars": 72,
+  "reasoningChars": 468,
+  "finish": "stop"
+}

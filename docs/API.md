@@ -90,7 +90,7 @@
 
 ### 模型配置、附件与资源
 
-- `GET /api/model-settings` → `{ defaults, capabilities }`；`PUT /api/model-settings` 接收 `{ model, webSearch, thinking, searchProvider? }`，校验实际能力并保存当前用户默认值。thinking 为 off/light/standard/deep；searchProvider 由服务端重算，开启搜索时保存到每轮 chat_runs.configurationJson。官方 DeepSeek 或 Tavily 可用时允许联网。
+- `GET /api/model-settings` → `{ defaults, capabilities, adjustmentReason? }`；`PUT /api/model-settings` 接收 `{ model, webSearch, thinking, searchProvider? }`，校验实际能力并保存当前用户默认值。thinking 为 off/light/standard/deep；searchProvider 由服务端重算，开启搜索时保存到每轮 chat_runs.configurationJson。官方 DeepSeek 或 Tavily 可用时允许联网。能力可返回 `thinkingUnavailableReason` 与 `search.unavailableReason`；恢复的旧偏好因服务端能力变更而调整时，通过 `adjustmentReason` 明确告知。请求快照中的不支持档位仍直接拒绝。
 - `POST /api/attachments`：multipart/form-data，字段 planId 与 file；返回 `{ id, url, mediaType, filename, size, width, height }`。每张≤5 MiB、8192 px 单边和24M像素，真实解码 JPEG/PNG/WebP 后统一重编码；一轮最多4张。
 - `GET /api/attachments/:id`：验证用户与所属规划，再返回图片正文；`DELETE` 移除未发送附件，已关联消息的附件受引用规则保护。跨用户、跨工作区访问不泄露存在性。清理规则见媒体文档。
 - `GET /api/plans/:id/resources` → `{ revision, resources }`；每个资源以稳定 entityId 关联，包含状态、图片来源／提供方／署名／类型及已确认坐标系和来源。

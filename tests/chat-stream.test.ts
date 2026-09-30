@@ -24,11 +24,12 @@ const mocks = vi.hoisted(() => ({
   select: vi.fn(),
   versionGet: vi.fn(),
   claimRun: vi.fn(), finishRun: vi.fn(), checkpointRun: vi.fn(),
+  resolveModelConfiguration: vi.fn(),
 }))
 
 vi.mock('@mastra/ai-sdk', () => ({ handleChatStream: mocks.handleChatStream }))
 vi.mock('../server/services/chat-jsonl', () => ({ jsonlChatResponse: (stream: unknown) => mocks.createUIMessageStreamResponse({ stream }) }))
-vi.mock('../server/services/model-settings', () => ({ resolveModelConfiguration: async () => ({ model: 'test-model', webSearch: false, thinking: 'off' }) }))
+vi.mock('../server/services/model-settings', () => ({ resolveModelConfiguration: mocks.resolveModelConfiguration }))
 vi.mock('../server/services/attachments', () => ({ resolveAttachments: async () => [], attachmentModelParts: async () => [] }))
 vi.mock('../server/providers/models', () => ({ modelCapabilities: () => ({ vision: false }) }))
 vi.mock('h3', async (importOriginal) => {
@@ -118,6 +119,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.useFakeTimers()
   vi.stubEnv('AI_API_KEY', 'chat-test-dummy-key')
+  mocks.resolveModelConfiguration.mockResolvedValue({ model: 'test-model', webSearch: false, thinking: 'off' })
   vi.stubGlobal('defineEventHandler', (value: unknown) => value)
   mocks.body = { planId, conversationId, messages: [textMessage('user', '请安排明天行程')] }
   mocks.requireUser.mockResolvedValue({ id: 'test-owner', name: '测试用户', email: 'test@example.test' })
@@ -174,6 +176,49 @@ afterEach(async () => {
 })
 
 describe('聊天 handler 的生命周期与规划锁', () => {
+  it.each(['off', 'light', 'standard', 'deep'])('%s 使用独立有界输出预算并保留本轮思考与搜索快照', async (thinking) => {
+    vi.stubEnv('AI_OUTPUT_MAX_TOKENS', '4096')
+    vi.stubEnv('AI_THINKING_OUTPUT_MAX_TOKENS', '32768')
+    for (const webSearch of [false, true]) {
+      const configuration = { model: 'test-model', thinking, webSearch }
+      mocks.resolveModelConfiguration.mockResolvedValue(configuration)
+      await drain(await (await handler())({}))
+      expect(mocks.claimRun.mock.calls.at(-1)?.[4]).toMatchObject({ configuration })
+      expect(mocks.createTravelMastra.mock.calls.at(-1)?.[0]).toMatchObject({ configuration })
+      expect(mocks.handleChatStream.mock.calls.at(-1)?.[0]).toMatchObject({ params: {
+        modelSettings: { maxOutputTokens: thinking === 'off' ? 4096 : 32768, maxRetries: 0 },
+      } })
+    }
+  })
+
+  it('向 SDK 明确开启真实思考事件，避免活跃思考被前端 45 秒空闲计时误判', async () => {
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([
+      { type: 'reasoning-start', id: 'r1' },
+      { type: 'reasoning-delta', id: 'r1', delta: '正在核对规划' },
+      { type: 'reasoning-end', id: 'r1' },
+      { type: 'text-delta', delta: '核对完毕' },
+    ]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(mocks.handleChatStream.mock.calls[0]![0]).toMatchObject({ sendReasoning: true })
+    expect(forwarded.some(chunk => chunk.type === 'reasoning-delta')).toBe(true)
+    expect(persisted().content).toBe('核对完毕')
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'completed', undefined)
+  })
+
+  it('思考期间整轮到期会明确报超时，落失败终态并允许再次发送', async () => {
+    vi.stubEnv('AI_RUN_TIMEOUT_MS', '3000')
+    mocks.handleChatStream.mockResolvedValueOnce(pendingUpstream())
+    const invoke = await handler()
+    const response = await invoke({})
+    const received = drain(response)
+    await vi.advanceTimersByTimeAsync(3100)
+    const forwarded = await received
+    expect(forwarded).toContainEqual({ type: 'error', errorText: expect.stringContaining('超时') })
+    expect(persisted().content).toContain('超时')
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'failed', 'generation_failed')
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
+  })
+
   it('尚未结束的流每两秒保存检查点，停止后只完成一次任务收尾', async () => {
     const upstream = pendingUpstream()
     upstream.reader.read.mockResolvedValueOnce({ value: { type: 'text-delta', delta: '途中已经生成的文字' }, done: false } as never)
@@ -239,11 +284,11 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     mocks.handleChatStream.mockImplementationOnce(() => { started(); return initialization })
     const invoke = await handler()
     const request = invoke({})
-    const rejected = expect(request).rejects.toMatchObject({ statusCode: 502 })
+    const rejected = expect(request).rejects.toMatchObject({ statusCode: 504 })
     await startedPromise
     await vi.advanceTimersByTimeAsync(180000)
     await rejected
-    expect(persisted().content).toContain('本次生成未完成')
+    expect(persisted().content).toContain('超时')
     expect(mocks.set).toHaveBeenCalledTimes(1)
     const options = mocks.handleChatStream.mock.calls[0]![0] as { params: { abortSignal: AbortSignal } }
     expect(options.params.abortSignal.aborted).toBe(true)

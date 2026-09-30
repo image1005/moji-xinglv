@@ -1,0 +1,50 @@
+{
+  "passed": true,
+  "runId": "2026-09-30T01-40-50-478Z",
+  "uiOnly": true,
+  "reasoningMs": 4000,
+  "runTimeoutMs": 6000,
+  "steps": [
+    {
+      "name": "临时数据库、生产应用与回环模型启动",
+      "status": "passed",
+      "durationMs": 1120
+    },
+    {
+      "name": "思考菜单键盘、选中状态、Escape 与外部点击焦点",
+      "status": "passed",
+      "durationMs": 209
+    },
+    {
+      "name": "配置保存失败可见、重试保存并刷新保留",
+      "status": "passed",
+      "durationMs": 424
+    },
+    {
+      "name": "移动端及横屏弹层位于视口内、独立开关与焦点返回",
+      "status": "passed",
+      "durationMs": 363
+    },
+    {
+      "name": "明确的能力响应夹具：不支持项禁用并说明原因",
+      "status": "passed",
+      "durationMs": 298
+    },
+    {
+      "name": "无未捕获浏览器异常，所有供应商调用保持隔离",
+      "status": "passed",
+      "durationMs": 0
+    }
+  ],
+  "snapshots": [],
+  "pageErrors": [],
+  "blockedExternalResources": [],
+  "mock": {
+    "requests": [],
+    "completed": 0,
+    "cancelled": 0,
+    "tools": [],
+    "rejected": []
+  },
+  "scope": "Controls-only follow-up: production UI/HTTP, temporary SQLite, keyboard/focus, configuration persistence/failure, small-screen selected-item visibility and explicitly replaced unsupported capability response. Model combinations, reasoning stream, tool continuation, stop and failure/timeout recovery were skipped; use the separate full report for those results."
+}

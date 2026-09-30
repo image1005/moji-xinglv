@@ -1,0 +1,41 @@
+[
+  {
+    "mode": "real-provider",
+    "scenario": "planning",
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "deep"
+    },
+    "passed": false,
+    "durationMs": 19923,
+    "terminal": "failed",
+    "persistedStatus": "failed",
+    "persistedError": "generation_failed",
+    "textChars": 0,
+    "reasoningChars": 0,
+    "upstreamReasoningChars": 9847,
+    "tools": [],
+    "sources": 0,
+    "errors": 1,
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 4096,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "length"
+        ],
+        "outputTokens": 4096,
+        "reasoningTokens": 4096
+      }
+    ]
+  }
+]

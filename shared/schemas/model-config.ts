@@ -10,10 +10,11 @@ export type ModelConfiguration = z.infer<typeof ModelConfigurationSchema>
 const ModelCapabilitiesSchema = z.strictObject({
   model: z.string(), provider: z.string(), vision: z.boolean(), tools: z.boolean(),
   thinkingLevels: z.array(ThinkingLevelSchema),
-  search: z.strictObject({ available: z.boolean(), provider: z.string().nullable(), native: z.boolean() }),
+  thinkingUnavailableReason: z.string().optional(),
+  search: z.strictObject({ available: z.boolean(), provider: z.string().nullable(), native: z.boolean(), unavailableReason: z.string().optional() }),
   verification: z.enum(['documented', 'configured']),
 })
-export const ModelSettingsSchema = z.strictObject({ defaults: ModelConfigurationSchema, capabilities: ModelCapabilitiesSchema })
+export const ModelSettingsSchema = z.strictObject({ defaults: ModelConfigurationSchema, capabilities: ModelCapabilitiesSchema, adjustmentReason: z.string().optional() })
 export type ModelCapabilities = z.infer<typeof ModelCapabilitiesSchema>
 export const SearchSourceSchema = z.strictObject({
   title: z.string().max(300), url: z.url().max(2048), summary: z.string().max(1200),
