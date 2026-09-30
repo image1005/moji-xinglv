@@ -7,7 +7,9 @@ import { compileAutoImports } from './scripts/knip-auto-imports'
  */
 export default ({ production }: { production?: boolean }): KnipConfig => ({
   // CLI administration programs are actual deployed operations, not app source roots.
-  entry: production ? ['server/database/migrate.ts!', 'server/database/seed.ts!'] : [
+  entry: production ? ['server/database/migrate.ts!', 'server/database/seed.ts!', 'scripts/migrate-prod.ts!'] : [
+    // Docker invokes this migration entry from docker-entrypoint.sh.
+    'scripts/migrate-prod.ts',
     // test-product passes this file as Bun --preload, not a JavaScript import.
     'scripts/mock-providers-preload.ts',
   ],
