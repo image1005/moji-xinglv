@@ -25,6 +25,7 @@
     "smoke": "bun run scripts/smoke.ts",
     "test:integration": "bun run scripts/verify-isolated.ts",
     "test:browser": "bun run scripts/test-browser.ts",
+    "test:versions": "bun run scripts/test-version-browser.ts",
     "test:recovery": "bun run scripts/test-recovery.ts",
     "test:product": "bun run scripts/test-product.ts",
     "eval:ai": "bun run scripts/eval-ai.ts",

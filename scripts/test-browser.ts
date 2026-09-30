@@ -272,13 +272,14 @@ try {
     const before = await details(planA)
     const versions = await api<{ version: number }[]>('GET', `/api/plans/${planA}/versions`)
     await page!.getByRole('tab', { name: '版本路线', exact: true }).click()
-    await page!.getByRole('button', { name: `版本 v${initialVersion}`, exact: true }).click()
+    await page!.locator(`.roadmap__node[data-version="${initialVersion}"]`).click()
     await page!.getByRole('button', { name: '切换到此版本', exact: true }).click()
     await expect.poll(async () => (await details(planA)).version).toBe(initialVersion)
     const after = await details(planA)
     assert.equal(after.revision, before.revision + 1)
     assert.equal((await api<unknown[]>('GET', `/api/plans/${planA}/versions`)).length, versions.length)
     assert.equal(after.plan.foodJournal.length, 0)
+    await page!.getByRole('button', { name: '关闭版本预览', exact: true }).click()
   })
 
   await step('移动端抽屉 Escape 焦点、页签键盘与缩小可视区域', async () => {

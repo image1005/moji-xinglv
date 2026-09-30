@@ -189,7 +189,9 @@ try {
     await expect.poll(async () => (await api<{ status: string }[]>(`/api/chat/runs?conversationId=${conversationId}`))[0]?.status).toBe('completed')
     assert.equal(mock.state.searches, searchCount, '关闭联网不会执行搜索')
     assert(mock.state.settings.some(value => value.effort === 'low'))
-    await page!.getByRole('button', { name: '保存行笺', exact: true }).click()
+    // AI edits are already persisted. The redundant chat save entry is gone.
+    await expect(page!.getByRole('button', { name: '保存行笺', exact: true })).toHaveCount(0)
+    await expect(page!.getByRole('button', { name: '保存当前规划', exact: true })).toHaveCount(0)
     await page!.reload(); await openChat()
     await expect(page!.locator('.chat-message img').first()).toBeVisible()
     await page!.screenshot({ path: join(reportDirectory, 'restored-image-history.png'), fullPage: true, animations: 'disabled' })
