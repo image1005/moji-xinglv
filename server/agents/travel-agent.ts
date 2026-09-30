@@ -82,7 +82,8 @@ export function createTravelMastra(ctx: AgentContext): Mastra {
     inputProcessors: [{
       id: 'bounded-input',
       processLLMRequest({ prompt }) {
-        const bounded = boundModelPrompt(prompt, toolBytes, aiConfig().AI_INPUT_MAX_BYTES)
+        const config = aiConfig()
+        const bounded = boundModelPrompt(prompt, toolBytes, config.AI_INPUT_MAX_BYTES, config.AI_REASONING_MAX_BYTES)
         ctx.onModelRequest?.()
         return { prompt: bounded }
       },

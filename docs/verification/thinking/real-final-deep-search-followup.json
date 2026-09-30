@@ -1,0 +1,155 @@
+[
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": true,
+      "thinking": "deep",
+      "searchProvider": "DeepSeek"
+    },
+    "passed": true,
+    "durationMs": 7959,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 138,
+    "reasoningChars": 1308,
+    "upstreamReasoningChars": 1308,
+    "tools": [
+      "search_web",
+      "get_plan"
+    ],
+    "sources": 5,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 288,
+        "reasoningTokens": 181
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": []
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          815
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 190,
+        "reasoningTokens": 110
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 2,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": true,
+      "thinking": "deep",
+      "searchProvider": "DeepSeek"
+    },
+    "passed": true,
+    "durationMs": 10200,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 142,
+    "reasoningChars": 4276,
+    "upstreamReasoningChars": 4276,
+    "tools": [
+      "search_web",
+      "get_plan"
+    ],
+    "sources": 5,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 1038,
+        "reasoningTokens": 923
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": []
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0,
+          3824
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 187,
+        "reasoningTokens": 105
+      }
+    ]
+  }
+]

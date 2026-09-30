@@ -27,6 +27,7 @@ const env = {
   ...process.env, NODE_ENV: 'production', DATABASE_URL: `file:${join(directory, 'product.db').replaceAll('\\', '/')}`,
   AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID(), BETTER_AUTH_URL: origin,
   AI_PROVIDER: 'deepseek', AI_MODEL: 'deepseek-flash', AI_API_KEY: 'fixture-only', AI_BASE_URL: mock.baseURL,
+  AI_DEEPSEEK_THINKING_LEVELS: 'off,light,standard,deep', AI_SUPPORTS_VISION: 'true',
   TAVILY_API_KEY: 'fixture-only', BAIDU_MAP_AK: 'fixture-only', PRODUCT_MOCK_PROVIDERS: '1',
   NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), HOST: '127.0.0.1', PORT: String(port),
 }
@@ -85,9 +86,10 @@ try {
     await openChat()
   })
   await step('真实文件上传的失败重试、纯图片发送及搜索深度参数', async () => {
-    await expect(page!.getByLabel('思考深度')).toBeEnabled()
-    await page!.getByLabel('思考深度').selectOption('deep')
-    await page!.getByLabel('联网搜索', { exact: true }).check()
+    await expect(page!.getByRole('button', { name: /^思考深度：/ })).toBeEnabled()
+    await page!.getByRole('button', { name: /^思考深度：/ }).click()
+    await page!.getByRole('menuitemradio', { name: '深度', exact: true }).click()
+    await page!.getByRole('button', { name: '智能搜索', exact: true }).click()
     let failOnce = true
     await page!.route('**/api/attachments', async route => {
       if (route.request().method() === 'POST' && failOnce) { failOnce = false; await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ statusMessage: '隔离测试：模拟首次上传失败' }) }) }
@@ -179,9 +181,11 @@ try {
     await api(`/api/plans/${planId}`, 'PATCH', { summary: '人工编辑已保存', expectedRevision: before.revision, expectedVersion: before.version })
     await page!.reload(); await openChat()
     await expect(page!.locator('.chat-message img').first()).toBeVisible()
-    await expect(page!.getByLabel('思考深度')).toHaveValue('deep')
-    await page!.getByLabel('联网搜索', { exact: true }).uncheck()
-    await page!.getByLabel('思考深度').selectOption('light')
+    await expect(page!.getByRole('button', { name: /^思考深度：/ })).toHaveAttribute('aria-label', '思考深度：深度')
+    await expect(page!.getByRole('button', { name: '智能搜索', exact: true })).toHaveAttribute('aria-pressed', 'true')
+    await page!.getByRole('button', { name: '智能搜索', exact: true }).click()
+    await page!.getByRole('button', { name: /^思考深度：/ }).click()
+    await page!.getByRole('menuitemradio', { name: '轻量', exact: true }).click()
     const searchCount = mock.state.searches
     await page!.locator('#travel-message').fill('根据刚才菜单截图调整行程')
     await page!.getByRole('button', { name: '发送消息', exact: true }).click()

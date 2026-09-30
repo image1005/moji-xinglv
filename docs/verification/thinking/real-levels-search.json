@@ -1,0 +1,298 @@
+[
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": true,
+      "thinking": "off",
+      "searchProvider": "DeepSeek"
+    },
+    "passed": true,
+    "durationMs": 7126,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 229,
+    "reasoningChars": 0,
+    "upstreamReasoningChars": 0,
+    "tools": [
+      "search_web",
+      "get_plan"
+    ],
+    "sources": 5,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "disabled"
+        },
+        "maxTokens": 4096,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 112
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": []
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "disabled"
+        },
+        "maxTokens": 4096,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 88
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": true,
+      "thinking": "light",
+      "searchProvider": "DeepSeek"
+    },
+    "passed": true,
+    "durationMs": 5980,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 98,
+    "reasoningChars": 271,
+    "upstreamReasoningChars": 271,
+    "tools": [
+      "search_web",
+      "get_plan"
+    ],
+    "sources": 5,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "low",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 154,
+        "reasoningTokens": 52
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": []
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "low",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          227
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 70,
+        "reasoningTokens": 9
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": true,
+      "thinking": "standard",
+      "searchProvider": "DeepSeek"
+    },
+    "passed": true,
+    "durationMs": 7006,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 179,
+    "reasoningChars": 494,
+    "upstreamReasoningChars": 494,
+    "tools": [
+      "search_web",
+      "get_plan"
+    ],
+    "sources": 5,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "high",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 175,
+        "reasoningTokens": 72
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": []
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "high",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          317
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 147,
+        "reasoningTokens": 37
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": true,
+      "thinking": "deep",
+      "searchProvider": "DeepSeek"
+    },
+    "passed": true,
+    "durationMs": 7452,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 111,
+    "reasoningChars": 1041,
+    "upstreamReasoningChars": 1041,
+    "tools": [
+      "search_web",
+      "get_plan"
+    ],
+    "sources": 5,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 214,
+        "reasoningTokens": 114
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": []
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          462
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 221,
+        "reasoningTokens": 148
+      }
+    ]
+  }
+]

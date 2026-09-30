@@ -101,7 +101,9 @@ Nitro（Bun 运行时）
 - `bun run test:integration`（`scripts/verify-isolated.ts`）：构建后生成临时 SQLite 与随机凭据，启动回环生产服务并执行 HTTP 验收；最后只停止自身服务及清理自身临时目录，不读写 `data/app.db`。脚本只调整自身代理环境，避免回环请求经过本机代理。
 - `bun run test:browser`：构建后以 Playwright Chromium、临时数据库和回环模拟 AI 检查草稿恢复/409、同规划生成连续性、版本、移动端与身份隔离。报告与截图写入 `.verification/browser/<时间>/`，失败仍保留诊断。首次安装用 `bunx playwright install chromium`；CI 用 `--with-deps`。不得把模拟模型通过作为真实供应商验收。
 - `bun run test:recovery`：构建后在私有临时数据库中让真实 AI 工具完成提交，再强制终止脚本自身启动的服务并同库重启，验证预览恢复、任务中断、重复请求不重放及新请求可继续。仅使用本地 SSE 模拟模型，报告在 `.verification/recovery/<时间>/`。
-- `bun run check:release`：按顺序运行 check、build、test:integration、test:recovery、test:browser；需要预先安装 Chromium，不启用真实供应商评测。
+- `bun run test:thinking:browser`：临时数据库与隔离供应商检查思考/搜索八种组合、重复思考的多步工具续传、停止/失败/超时恢复和按钮可访问性；`THINKING_BROWSER_LONG=1` 使用 50 秒持续思考及 65 秒测试期限，实际验证超过客户端 45 秒空闲窗口仍可继续。报告与截图位于 `.verification/thinking/<时间>/`。
+- `bun run verify:thinking --real`：明确启用真实模型验收；可加 `--search`、`--followup`，或 `--thinking=deep --planning` 验证七天行程。只写临时数据库，输出参数、计数与终态，不输出密钥或思考正文。
+- `bun run check:release`：按顺序运行 check、verify:media、build、test:integration、test:recovery、test:browser、test:thinking:browser、test:product；需要预先安装 Chromium，不启用真实供应商评测。
 - `bun run eval:ai`：固定样例验证结构化编辑契约，默认无外部调用。真实评测必须同时设置 `EVAL_LIVE=true` 并传 `--live`，受 `EVAL_MAX_CASES` 限制，使用临时数据库；未运行时不报告模型准确率或 token 节约幅度。
 - 聊天回归覆盖不可信历史过滤、活动规划锁、失败/取消单次收尾及工具输出版本关联；影像代理回归覆盖响应脱敏、文件签名、体积上限及并发去重。它们是隔离测试，不替代真实模型/百度联调。
 - 验收结论以本次实际命令的退出码与输出报告为准；未运行 smoke、浏览器、AI 或百度实测时须明确说明，不能由 lint / 单测推断已经验收。

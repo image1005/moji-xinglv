@@ -174,7 +174,10 @@ bun dev
 | `AI_PROVIDER` / `AI_SUPPORTS_VISION` | 自定义网关显式选择 DeepSeek provider；其他网关视觉须经部署者验证后开启 |
 | `AI_SEARCH_PROVIDER` | `auto`（默认）：优先 Tavily，否则使用官方 DeepSeek 密钥搜索；可显式指定 `deepseek`、`tavily` 或 `off` |
 | `TAVILY_API_KEY` | 可选的独立 Tavily 搜索；使用官方 DeepSeek 搜索时无需此配置 |
-| `AI_INPUT_MAX_BYTES` / `AI_OUTPUT_MAX_TOKENS` | 默认 96000 字节输入预算 / 4096 输出 token；输入预算包含规则、工具契约和工具结果 |
+| `AI_INPUT_MAX_BYTES` / `AI_OUTPUT_MAX_TOKENS` | 默认 96000 字节普通输入预算 / 4096 非思考输出 token；普通输入包含规则、工具契约和工具结果 |
+| `AI_THINKING_OUTPUT_MAX_TOKENS` / `AI_REASONING_MAX_BYTES` | 思考模式默认每步 32768 个总输出 token（含思考、正文、工具参数）；协议要求完整回传的思考内容另限 262144 字节，不截断思考或降低档位 |
+| `AI_RUN_TIMEOUT_MS` | 整轮默认 180000 毫秒，包含排队、思考和工具，超时明确失败；范围 1000–600000 |
+| `AI_DEEPSEEK_THINKING_LEVELS` | 兼容网关配合 `AI_PROVIDER=deepseek` 使用；仅填写已核实档位，如 `off,light,standard,deep`。留空不启用思考能力；官方接口按已核实能力提供 |
 | `AI_GLOBAL_CONCURRENCY` / `AI_USER_CONCURRENCY` | 默认同时生成 4 / 1 个任务 |
 | `AI_QUEUE_LIMIT` / `AI_QUEUE_WAIT_MS` | 默认队列 8 个、等待上限 10000ms |
 | `AI_REQUESTS_PER_PERIOD` / `AI_GLOBAL_REQUESTS_PER_PERIOD` / `AI_PERIOD_SECONDS` | 默认每用户 60 次、全局 1000 次 / 3600 秒；限额返回 429 |

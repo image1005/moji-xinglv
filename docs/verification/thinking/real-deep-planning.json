@@ -1,0 +1,161 @@
+[
+  {
+    "mode": "real-provider",
+    "scenario": "planning",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "deep"
+    },
+    "passed": true,
+    "durationMs": 86969,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 604,
+    "reasoningChars": 35345,
+    "upstreamReasoningChars": 35345,
+    "tools": [
+      "apply_plan_edits",
+      "apply_plan_edits",
+      "apply_plan_edits",
+      "apply_plan_edits",
+      "apply_plan_edits"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "failureMessages": [],
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 7,
+      "spots": 28,
+      "foods": 7,
+      "checklist": 9
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 14845,
+        "reasoningTokens": 13546
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          34585
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 991,
+        "reasoningTokens": 27
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          34585,
+          67
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 956,
+        "reasoningTokens": 28
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          34585,
+          67,
+          68
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 1207,
+        "reasoningTokens": 24
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          34585,
+          67,
+          68,
+          63
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 404,
+        "reasoningTokens": 56
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          34585,
+          67,
+          68,
+          63,
+          165
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 434,
+        "reasoningTokens": 128
+      }
+    ]
+  }
+]
