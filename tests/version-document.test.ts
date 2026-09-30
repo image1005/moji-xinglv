@@ -4,9 +4,9 @@ import { createWorkspaceDocument } from '../app/features/workspace/document'
 import { VersionMetadataSchema, type VersionMetadata } from '../app/utils/version-metadata'
 import type { PlanDetail } from '../app/utils/api'
 
-const mocks = vi.hoisted(() => ({ versionsPage: vi.fn(), renameVersion: vi.fn(), detail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ versionsPage: vi.fn(), renameVersion: vi.fn(), detail: vi.fn(), restoreDraft: vi.fn() }))
 vi.mock('~/utils/api', () => ({ api: { plans: mocks } }))
-vi.mock('~/utils/idb', () => ({ idbGet: vi.fn().mockResolvedValue(null), idbSet: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('~/utils/idb', () => ({ idbGet: async () => null, idbSet: async () => undefined }))
 beforeEach(() => vi.resetAllMocks())
 
 function item(version: number, nameRevision = 0, name: string | null = null) {
@@ -134,5 +134,44 @@ describe('独立版本名称状态与分页', () => {
     expect(await renaming).toBeNull()
     expect(await refreshing).toBeNull()
     expect(document.versions.value).toEqual([])
+  })
+})
+
+describe('恢复服务端草稿', () => {
+  it('使用用户比较过的修订号，恢复后重新读取当前行程、消息和版本列表', async () => {
+    const reloadConversation = vi.fn()
+    const document = createWorkspaceDocument({ navigation: () => 0, lifetime: () => 0, conversationId: () => 11,
+      matchingConversation: () => 11, reloadConversation, rememberPlan: vi.fn(), errorMessage: ref('') })
+    document.currentPlan.value = { id: 1, version: 8, revision: 20, plan: { title: '其他设备的新行程' } } as PlanDetail
+    // A repeated successful recovery can refer to an older result; never put its snapshot into currentPlan.
+    mocks.restoreDraft.mockResolvedValue({ version: 7, revision: 20, skipped: true })
+    mocks.detail.mockResolvedValue({ id: 1, version: 8, revision: 20, plan: { title: '保持最新正式行程' } })
+    mocks.versionsPage.mockResolvedValue(page([item(8), item(7)]))
+    await document.restoreDraft(42, 5, 12)
+    expect(mocks.restoreDraft).toHaveBeenCalledWith(1, 42, { expectedVersion: 5, expectedRevision: 12, conversationId: 11 })
+    expect(document.currentPlan.value).toMatchObject({ version: 8, revision: 20 })
+    expect(reloadConversation).toHaveBeenCalledOnce()
+    expect(mocks.versionsPage).toHaveBeenCalledWith(1, undefined)
+  })
+
+  it('409 不刷新比较基线或自动重试，交由弹窗要求再次确认', async () => {
+    const { document } = setup()
+    mocks.restoreDraft.mockRejectedValue({ statusCode: 409 })
+    await expect(document.restoreDraft(42, 5, 12)).rejects.toMatchObject({ statusCode: 409 })
+    expect(mocks.restoreDraft).toHaveBeenCalledOnce()
+    expect(mocks.detail).not.toHaveBeenCalled()
+    expect(document.currentPlan.value).toMatchObject({ version: 5, revision: 12 })
+  })
+
+  it('切换工作区后的迟到恢复结果不刷新另一工作区', async () => {
+    const { document, navigate } = setup()
+    const result = deferred<{ version: number }>()
+    mocks.restoreDraft.mockReturnValue(result.promise)
+    const restoring = document.restoreDraft(42, 5, 12)
+    navigate()
+    result.resolve({ version: 6 })
+    expect(await restoring).toBeNull()
+    expect(mocks.detail).not.toHaveBeenCalled()
+    expect(mocks.versionsPage).not.toHaveBeenCalled()
   })
 })

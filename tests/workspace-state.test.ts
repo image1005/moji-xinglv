@@ -3,7 +3,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import type { MessageRecord, PlanPreview } from '../shared/types'
 import type { PlanDetail } from '../app/utils/api'
 import { useWorkspace } from '../app/composables/useWorkspace'
-import { toWorkbenchMessages } from '../app/features/workspace/messages'
+import { messagePreview, toWorkbenchMessages } from '../app/features/workspace/messages'
 import type { Attachment } from '../shared/schemas/attachment'
 import type { PlanResources } from '../shared/schemas/media'
 
@@ -329,12 +329,13 @@ describe('持久化消息预览', () => {
     expect(message.parts).toEqual([{ type: 'file', url: '/api/attachments/123', mediaType: 'image/png', filename: '攻略.png' }])
     expect(message.parts.some(part => part.type === 'text')).toBe(false)
   })
-  it('工具已携带相同版本预览时不重复追加 data-preview', () => {
+  it('持久化权威预览独立于工具检查点保留', () => {
     const preview = { planId: 1, version: 3 } as PlanPreview
     const records = [{ id: 1, role: 'assistant', content: '', toolCalls: [{ name: 'save_plan', output: { preview } }], preview }] as MessageRecord[]
     const message = toWorkbenchMessages(records)[0]!
-    expect(message.parts.filter((part) => part.type === 'data-preview')).toHaveLength(0)
+    expect(message.parts.filter((part) => part.type === 'data-preview')).toHaveLength(1)
     expect(message.parts.filter((part) => part.type === 'tool-save_plan')).toHaveLength(1)
+    expect(messagePreview(message.parts)).toEqual(preview)
   })
 
   it('不同版本预览和没有工具的系统预览均保留', () => {

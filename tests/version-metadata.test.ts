@@ -18,6 +18,9 @@ describe('版本名称兼容边界', () => {
     expect(VersionNameInputSchema.safeParse({ name: '山'.repeat(41), expectedNameRevision: 0 }).success).toBe(false)
     expect(VersionNameInputSchema.safeParse({ name: '🏞'.repeat(40), expectedNameRevision: 0 }).success).toBe(true)
     expect(VersionNameInputSchema.safeParse({ name: '山海', expectedNameRevision: -1 }).success).toBe(false)
+    for (const name of ['<b>山海</b>', '第一天\n第二天', '山\u200b海', '山\u0000海']) {
+      expect(VersionNameInputSchema.safeParse({ name, expectedNameRevision: 0 }).success, name).toBe(false)
+    }
   })
   it('列表解码保留服务端名称字段，改名 PATCH 使用展示版本号与独立锁', async () => {
     const named = { ...legacy, name: '江南慢游', nameSource: 'user', nameRevision: 2 }

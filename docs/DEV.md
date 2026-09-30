@@ -19,9 +19,9 @@ Nitro（Bun 运行时）
 关键数据流：
 
 1. **AI 编辑**：`apply_plan_edits(edits[])`（原子操作：plan/day/spot/food/checklist × add/update/remove/move/status/toggle）→
-   服务端在同一事务内按序应用、`PlanSchema` 校验、写入版本与更新 `plans.plan_json`；`patch_plan_json` 仅作兜底。
-   **一轮对话只保留一个版本**：同一 `assistantMessageId` 且仍是当前版本时原地更新（diff 对父版本重算），指针被移动或换轮后追加新版本。
-   工具执行侧维护读取时 revision，事务提交后推进；409 必须重读。预览与版本引用在规划提交事务内写入助手消息。AI 不提供全量覆盖工具。
+   服务端在同一事务内按序应用、`PlanSchema` 校验并写入运行草稿；正常收尾时才创建正式版本与更新 `plans.plan_json`；`patch_plan_json` 仅作兜底。
+   **一轮对话只提交一个正式版本**：同一 `assistantMessageId` 的多次编辑更新持久化运行草稿，正常终态才提交最终快照；失败、取消或重启保留可恢复草稿及上一成功版本。运行中有其他编辑或版本切换时，禁止用过期草稿覆盖新结果，必须由用户比较后明确恢复。
+   工具执行侧维护读取时 revision，事务提交后推进；409 必须重新检查作用域和基线，不能以重读绕过草稿冲突。草稿预览及最终版本引用与各自提交事务一起写入助手消息。AI 不提供全量覆盖工具。
 2. **切换版本（Undo）**：校验当前 `expectedVersion`、`expectedRevision` 与会话归属 → 读取目标版本 → 设置当前规划快照与 `current_version_id`，递增 revision（**不新建版本**）→ 同事务插入系统消息与预览。
    历史永不删除；过期写入返回 409。切换后继续编辑会以 `max(version)+1` 追加版本、以当前版本为父，版本路线图据此分叉。
 3. **百度请求**：相同参数单飞去重 → `hashKey(api, params)` → Nitro storage → SQLite `cache` 表 → 未命中才带 AK 请求百度 → 回写。二进制 L1 使用可序列化 base64 与绝对过期时间，L2 命中回填剩余 TTL；前端再包一层按用户隔离的 IndexedDB。历史 `panoramas` 表保留兼容，但新图片统一使用 `cache`。
@@ -76,7 +76,7 @@ Nitro（Bun 运行时）
 - **AI 只产 patch**：工具入参、输出、最终 JSON 全链路 Zod 校验；禁止用模型文本整体覆盖 `plan_json`，不向 AI 暴露全量覆盖工具。原子编辑优先 `apply_plan_edits`，`patch_plan_json` 仅兜底；工具无需先读，409 冲突时由模型重读重试。
 - **严格契约**：Day / Spot / Budget / 食记 / 清单 / 行程对象均为 `z.strictObject`；未知字段返回 400 与改名提示（`formatPlanIssues`），不静默丢弃。手工编辑全部走可视化表单（行程总览「编辑资料」、路线舆图、风物食记、出行清单）。
 - **数据扩展**：`foodJournal` / `checklist` 缺省 `[]`，条目 ID 各自唯一。`Spot.lng` / `lat` 缺省且未知时同时为 `null`；`address=''`、`category='sight'`、`durationMinutes=60`、`cost=0`。所有入口经同一 schema 归一化，旧 JSON 无需破坏性迁移。
-- **乐观锁**：保存、资料修改和切换应携带读取时的 `expectedVersion` / `expectedRevision`；同一事务校验并写入。revision 随有效修改前进，包括同轮 AI 原地更新、Markdown 资料变更及版本切换，不能由版本号代替。无变化保存也先检查已传值。409 保留草稿，比较后明确重新应用；旅行偏好独立发送 expectedVersion，不存在时为 0。
+- **乐观锁**：保存、资料修改和切换应携带读取时的 `expectedVersion` / `expectedRevision`；同一事务校验并写入。revision 随有效修改前进，包括 AI 草稿检查点、正式提交、Markdown 资料变更及版本切换，不能由版本号代替。无变化保存也先检查已传值。409 保留草稿，比较后明确重新应用；旅行偏好独立发送 expectedVersion，不存在时为 0。版本改名独立使用 `expectedNameRevision`，不推进规划 revision。
 - **版本指针**：当前版本 = `plans.current_version_id`（为兼容历史数据，指针为空时回退到最新版本）。切换版本只改指针与规划快照；新版本编号取 `max(version)+1`，因此切换后继续编辑可能跳号并在路线图中分叉。
 - **地图边界**：只允许静态图与 panorama 服务端代理。POI 仅检索当前规划；未知坐标不生成地图请求、不由 AI 猜测。路线只是景点顺序连线，不是导航；无 key 提示降级，不阻断行程编辑。
 - **密钥边界**：`BAIDU_MAP_AK` 只允许在 `server/services/baidu.ts` 读取；

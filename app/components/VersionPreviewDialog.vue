@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { api, apiErrorMessage } from '~/utils/api'
 import { formatDateTime, sourceLabel } from '~/utils/format'
-import { versionName, type VersionMetadata } from '~/utils/version-metadata'
+import { versionName, VersionNameInputSchema, type VersionMetadata } from '~/utils/version-metadata'
 import { createVersionPreview, watchVersionSelection } from '~/utils/version-preview'
 
 const props = defineProps<{ planId: number; version: VersionMetadata }>()
@@ -30,7 +30,7 @@ const current = computed(() => ws.currentPlan.value?.id === props.planId && ws.c
 const validWorkspace = computed(() => ws.currentPlan.value?.id === props.planId)
 const trimmedName = computed(() => draft.value.trim())
 const nameLength = computed(() => Array.from(trimmedName.value).length)
-const validName = computed(() => nameLength.value >= 1 && nameLength.value <= 40)
+const validName = computed(() => VersionNameInputSchema.safeParse({ name: trimmedName.value, expectedNameRevision: expectedNameRevision.value }).success)
 const nameOrigin = computed(() => ({ ai: 'AI 命名', user: '手动命名', fallback: '默认名称' })[metadata.value.nameSource ?? 'fallback'])
 const changes = computed(() => metadata.value.diffJson ?? [])
 const fields: Record<string, string> = { title: '行程标题', summary: '行程简介', cover: '封面', days: '每日安排', tips: '出行提示', budget: '行程预算', tags: '行程标签', foodJournal: '风物食记', checklist: '出行清单' }
@@ -152,7 +152,7 @@ function cancelRename() {
 
 async function saveName() {
   if (saving.value || refreshing.value || switching.value || !validWorkspace.value) return
-  if (!validName.value) { renameError.value = '名称去掉首尾空白后须为 1–40 字。'; return }
+  if (!validName.value) { renameError.value = '名称去掉首尾空白后须为 1–40 字单行纯文本。'; return }
   if (conflict.value && !latestName.value) return
   const token = selection
   const revision = latestName.value?.nameRevision ?? expectedNameRevision.value
@@ -215,7 +215,7 @@ async function switchToVersion() {
           <form v-else class="version-preview__rename" @submit.prevent="saveName">
             <label :for="`${labelId}-name`">版本名称</label>
             <input :id="`${labelId}-name`" ref="nameInput" v-model="draft" type="text" :disabled="saving" :aria-describedby="`${labelId}-name-help`" :aria-invalid="nameLength > 40" autocomplete="off">
-            <p :id="`${labelId}-name-help`" class="version-preview__hint">去掉首尾空白后 1–40 字，版本号始终保留。{{ nameLength }} / 40</p>
+            <p :id="`${labelId}-name-help`" class="version-preview__hint">去掉首尾空白后 1–40 字单行纯文本，版本号始终保留。{{ nameLength }} / 40</p>
             <div v-if="conflict" class="version-preview__conflict" role="status"><strong>名称冲突，输入已保留</strong><p v-if="latestName">最新名称：{{ versionName(latestName) }}<br>你的输入：{{ trimmedName || '（空）' }}</p><button type="button" class="btn btn--small" :disabled="refreshing || saving" @click="refreshName">{{ refreshing ? '读取中…' : '读取最新名称' }}</button><p v-if="latestName" class="version-preview__hint">比较后，点击“以我的名称重新提交”才会覆盖最新名称。</p></div>
             <p v-if="renameError" class="feedback feedback--error" role="alert">{{ renameError }}</p>
             <div class="version-preview__name-tools"><button type="submit" class="btn btn--seal btn--small" :disabled="saving || refreshing || !validName || (conflict && !latestName)">{{ saving ? '保存中…' : conflict ? '以我的名称重新提交' : '保存名称' }}</button><button type="button" class="btn btn--small" :disabled="saving" @click="cancelRename">取消改名</button></div>

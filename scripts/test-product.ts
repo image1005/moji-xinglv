@@ -7,7 +7,7 @@ import { join, relative, resolve, sep } from 'node:path'
 import { chromium, expect, type Browser, type Page } from '@playwright/test'
 import sharp from 'sharp'
 import { startProductModel } from './mock-product-ai'
-import type { PlanDetail } from '../shared/schemas/workspace'
+import type { MessageRecord, PlanDetail, VersionItem } from '../shared/schemas/workspace'
 import type { PlanResources } from '../shared/schemas/media'
 import type { Attachment } from '../shared/schemas/attachment'
 
@@ -41,6 +41,27 @@ async function api<T>(path: string, method = 'GET', data?: unknown): Promise<T> 
   const response = await page!.request.fetch(`${origin}${path}`, { method, data, headers: { origin } })
   assert(response.ok(), `${path}: ${response.status()} ${(await response.text()).slice(0, 400)}`)
   return response.json() as Promise<T>
+}
+async function namedVersions(expectedCount: number) {
+  let versions: VersionItem[] = []
+  await expect.poll(async () => {
+    versions = await api<VersionItem[]>(`/api/plans/${planId}/versions`)
+    return versions.length === expectedCount && versions.every(version => version.nameSource === 'ai' && version.name === '隔离验证行程定稿' && version.nameRevision === 2)
+  }, { timeout: 20000 }).toBe(true)
+  assert.equal(mock.state.namingRequests, expectedCount, '每个正式版本只请求一次模型命名，聊天请求独立统计')
+  return versions
+}
+async function finalizedPreview(version: number) {
+  const versions = await api<VersionItem[]>(`/api/plans/${planId}/versions`)
+  const formal = versions.find(item => item.version === version)
+  assert(formal)
+  const conversation = await api<{ messages: MessageRecord[] }>(`/api/conversations/${conversationId}`)
+  const assistant = conversation.messages.findLast(message => message.role === 'assistant')
+  assert.equal(assistant?.planVersion, formal.id, '成功消息关联最终正式版本身份')
+  assert.equal(assistant?.preview?.version, version)
+  assert.equal(assistant?.preview?.status, undefined, '成功终态不能残留草稿预览')
+  assert.equal(assistant?.preview?.draftId, undefined)
+  assert.deepEqual((await api<{ drafts: unknown[] }>(`/api/plans/${planId}/drafts`)).drafts, [], '成功定稿后没有可恢复或活动草稿')
 }
 async function expandedFolder() {
   const folder = page!.locator('.folder').filter({ has: page!.locator('.folder__title', { hasText: '图文产品验收' }) })
@@ -84,6 +105,7 @@ try {
     conversationId = (await api<{ id: number }>('/api/conversations', 'POST', { planId })).id
     await page.goto(origin)
     await openChat()
+    await namedVersions(1)
   })
   await step('真实文件上传的失败重试、纯图片发送及搜索深度参数', async () => {
     await expect(page!.getByRole('button', { name: /^思考深度：/ })).toBeEnabled()
@@ -115,6 +137,8 @@ try {
     assert.equal(plan.plan.foodJournal.length, 1)
     assert(plan.plan.days[0]!.spots.every(spot => spot.id))
     assert.equal(plan.version, 2, '一轮工具编辑仅提交一个版本')
+    await namedVersions(2)
+    await finalizedPreview(2)
   })
   await step('景点食记图片和城市地图逐步补齐，不改变行程版本', async () => {
     const before = await api<PlanDetail>(`/api/plans/${planId}`)
@@ -179,6 +203,7 @@ try {
   await step('编辑保存、刷新恢复图片历史并继续图片追问', async () => {
     const before = await api<PlanDetail>(`/api/plans/${planId}`)
     await api(`/api/plans/${planId}`, 'PATCH', { summary: '人工编辑已保存', expectedRevision: before.revision, expectedVersion: before.version })
+    await namedVersions(3)
     await page!.reload(); await openChat()
     await expect(page!.locator('.chat-message img').first()).toBeVisible()
     await expect(page!.getByRole('button', { name: /^思考深度：/ })).toHaveAttribute('aria-label', '思考深度：深度')
@@ -193,6 +218,8 @@ try {
     await expect.poll(async () => (await api<{ status: string }[]>(`/api/chat/runs?conversationId=${conversationId}`))[0]?.status).toBe('completed')
     assert.equal(mock.state.searches, searchCount, '关闭联网不会执行搜索')
     assert(mock.state.settings.some(value => value.effort === 'low'))
+    await namedVersions(4)
+    await finalizedPreview(4)
     // AI edits are already persisted. The redundant chat save entry is gone.
     await expect(page!.getByRole('button', { name: '保存行笺', exact: true })).toHaveCount(0)
     await expect(page!.getByRole('button', { name: '保存当前规划', exact: true })).toHaveCount(0)
@@ -209,6 +236,8 @@ try {
     await expect.poll(async () => (await api<{ status: string }[]>(`/api/chat/runs?conversationId=${conversationId}`))[0]?.status).toBe('cancelled')
     const after = await api<PlanDetail>(`/api/plans/${planId}`)
     assert.equal(after.version, before.version); assert.equal(after.revision, before.revision)
+    await namedVersions(4)
+    assert.deepEqual((await api<{ drafts: unknown[] }>(`/api/plans/${planId}/drafts`)).drafts, [], '未执行编辑的取消任务不创建恢复草稿')
     await page!.reload(); await openChat()
     await expect(page!.locator('.chat-message')).toContainText(['生成已停止'])
     await expect(page!.locator('.chat-message img').first()).toBeVisible()

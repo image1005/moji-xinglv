@@ -1,4 +1,4 @@
-/** Real production UI/HTTP + temporary SQLite. Only pending name API and AI provider use explicit fixtures. */
+/** Real production UI/HTTP + temporary SQLite; only model responses and explicit network failures are fixtures. */
 import assert from 'node:assert/strict'
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
@@ -34,8 +34,6 @@ const env = {
   TAVILY_API_KEY: '', BAIDU_MAP_AK: '',
   NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), HOST: '127.0.0.1', PORT: String(port),
 }
-type NamedVersion = VersionItem & { name: string | null; nameSource: 'ai' | 'user' | 'fallback' | null; nameRevision: number }
-const names = new Map<number, Pick<NamedVersion, 'name' | 'nameSource' | 'nameRevision'>>()
 const steps: { name: string; status: 'passed' | 'failed'; error?: string }[] = []
 const pageErrors: string[] = []
 const mutations: string[] = []
@@ -43,7 +41,7 @@ const snapshotRequests: Record<string, number> = {}
 const measurements: Record<string, unknown> = {}
 let browser: Browser | undefined, page: Page | undefined, server: ReturnType<typeof Bun.spawn> | undefined
 let stdout: Promise<string> | undefined, stderr: Promise<string> | undefined
-let planId = 0, otherId = 0, conversationId = 0, passed = false, renameFailure = 0, nameFixtureEnabled = false
+let planId = 0, otherId = 0, conversationId = 0, passed = false, renameFailure = false
 const title = '山海版本验收 · 江南行笺'
 const otherTitle = '另一个工作区 · 隔离核验'
 const richPlan = PlanSchema.parse({
@@ -122,7 +120,7 @@ try {
       await Bun.sleep(100)
     }
     assert(ready)
-    browser = await chromium.launch({ headless: true })
+    browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined })
     page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, hasTouch: true })
     page.on('pageerror', error => pageErrors.push(error.message))
     page.on('request', request => {
@@ -146,28 +144,17 @@ try {
     }
     otherId = (await api<{ planId: number }>('/api/plans', 'POST', { title: otherTitle })).planId
     await api('/api/conversations', 'POST', { planId: otherId })
+    await expect.poll(async () => (await list()).every(item => item.nameSource === 'ai' && item.name === '隔离验证行程定稿'), { timeout: 20000 }).toBe(true)
     const all = await list()
-    for (const item of all) names.set(item.id, { name: item.version === 1 ? '江南烟雨初稿' : item.version === 66 ? '沿西湖望姑苏缓缓行走记录风物与四季烟火的长名称版本' : null, nameSource: item.version === 1 ? 'ai' : item.version === 66 ? 'user' : null, nameRevision: 0 })
-    // Pending backend contract: metadata fixture is confined to this test process.
-    await page.route('**/api/plans/*/versions?*', async route => {
-      const response = await route.fetch()
-      const body = await response.json() as { items: VersionItem[] }
-      await route.fulfill({ response, json: { ...body, items: body.items.map(item => ({ ...item, ...names.get(item.id) })) } })
-    })
+    assert.equal(all.length, 66)
+    assert(all.every(item => item.nameRevision === 2), '正式版本须经过真实的命名申请与模型写回')
+    assert(mock.state.namingRequests >= all.length)
+    const latest = all.find(item => item.version === 66)!
+    await api(`/api/plans/${planId}/versions/66/name`, 'PATCH', { name: '沿西湖望姑苏缓缓行走记录风物与四季烟火的长名称版本', expectedNameRevision: latest.nameRevision })
+    // Only an explicit outage is intercepted. Successful writes, metadata reads and CAS use the server.
     await page.route('**/api/plans/*/versions/*/name', async route => {
-      if (!nameFixtureEnabled) { await route.continue(); return }
-      if (renameFailure) { await route.fulfill({ status: renameFailure, json: { statusCode: renameFailure, statusMessage: renameFailure === 409 ? '名称已由其他窗口修改，请刷新后重试' : '隔离测试：名称保存暂时失败' } }); return }
-      const match = /\/plans\/(\d+)\/versions\/(\d+)\/name$/.exec(new URL(route.request().url()).pathname)!
-      assert.equal(Number(match[1]), planId)
-      const version = all.find(item => item.version === Number(match[2]))!
-      assert(version)
-      const body = route.request().postDataJSON() as { name: string; expectedNameRevision: number }
-      const previous = names.get(version.id)!
-      assert.equal(body.expectedNameRevision, previous.nameRevision)
-      assert(body.name.length >= 1 && body.name.length <= 40 && body.name === body.name.trim())
-      const metadata = { name: body.name, nameSource: 'user' as const, nameRevision: previous.nameRevision + 1 }
-      names.set(version.id, metadata)
-      await route.fulfill({ json: { version: { ...version, ...metadata } } })
+      if (renameFailure) { await route.fulfill({ status: 503, json: { statusCode: 503, statusMessage: '隔离测试：名称保存暂时失败' } }); return }
+      await route.continue()
     })
     await page.goto(origin); await openRoadmap()
     await expect(page!.locator('.roadmap__node')).toHaveCount(50)
@@ -262,23 +249,12 @@ try {
     await page!.waitForTimeout(850); await expect(dialog()).toHaveCount(0); await expect(page!.locator('.roadmap__node')).toHaveCount(1)
     await openRoadmap(); await page!.getByRole('button', { name: '加载更早的版本', exact: true }).click(); await expect(page!.locator('.roadmap__node')).toHaveCount(66)
   })
-  await step('后端命名端点尚未合并时真实请求失败，输入仍保留', async () => {
-    await openVersion(1)
-    await dialog().getByRole('button', { name: '修改版本名称', exact: true }).click()
-    await dialog().getByLabel('版本名称', { exact: true }).fill('后端未合并时保留这份输入')
-    const response = page!.waitForResponse(value => value.url().endsWith(`/versions/1/name`) && value.request().method() === 'PATCH')
-    await dialog().getByRole('button', { name: '保存名称', exact: true }).click()
-    const result = await response
-    assert(!result.ok(), 'Pending endpoint unexpectedly exists; update fixture assumptions')
-    measurements.pendingBackend = { status: result.status(), contract: 'PATCH /api/plans/:id/versions/:version/name' }
-    await expect(dialog().getByRole('alert')).toBeVisible()
-    await expect(dialog().getByLabel('版本名称', { exact: true })).toHaveValue('后端未合并时保留这份输入')
-    await closePreview()
-    nameFixtureEnabled = true
-  })
-  await step('历史改名独立提交、错误保留输入、409 刷新与刷新后持久显示', async () => {
+  await step('真实历史改名不切指针、503 保留输入、后端 CAS 冲突与刷新持久化', async () => {
     const before = await snapshotState()
+    const beforePlan = await detail()
+    const original = (await list()).find(item => item.version === 1)!
     await openVersion(1)
+    await expect(dialog()).toContainText('隔离验证行程定稿')
     await dialog().getByRole('button', { name: '修改版本名称', exact: true }).click()
     const input = dialog().getByRole('textbox')
     await input.fill('   ')
@@ -286,30 +262,42 @@ try {
     await input.fill('江'.repeat(41))
     await expect(dialog().getByRole('button', { name: '保存名称', exact: true })).toBeDisabled()
     await dialog().getByRole('button', { name: '取消改名', exact: true }).click()
-    await expect(dialog()).toContainText('江南烟雨初稿')
+    await expect(dialog()).toContainText('隔离验证行程定稿')
     await dialog().getByRole('button', { name: '修改版本名称', exact: true }).click()
     await input.fill('  烟雨江南 · 留存初稿  ')
-    renameFailure = 503
+    renameFailure = true
     await dialog().getByRole('button', { name: /保存名称/ }).click()
     await expect(dialog()).toContainText('名称保存暂时失败')
     await expect(input).toHaveValue('  烟雨江南 · 留存初稿  ')
-    renameFailure = 409
-    const original = (await list()).find(item => item.version === 1)!
-    names.set(original.id, { name: '其他窗口已改名', nameSource: 'user', nameRevision: 1 })
+    assert.deepEqual((await list()).find(item => item.version === 1), original, '模拟网络失败不得写入名字')
+    renameFailure = false
+    const competing = await api<{ version: VersionItem }>(`/api/plans/${planId}/versions/1/name`, 'PATCH', { name: '其他窗口已改名', expectedNameRevision: original.nameRevision })
+    assert.equal(competing.version.nameRevision, original.nameRevision + 1)
+    const rejected = page!.waitForResponse(value => value.url().endsWith('/versions/1/name') && value.request().method() === 'PATCH')
     await dialog().getByRole('button', { name: /保存名称/ }).click()
-    await expect(dialog()).toContainText(/冲突|其他窗口/)
+    assert.equal((await rejected).status(), 409, '过期名称修订号必须由真实后端拒绝')
+    await expect(dialog()).toContainText(/冲突|其他操作/)
     await expect(input).toHaveValue('  烟雨江南 · 留存初稿  ')
     await dialog().getByRole('button', { name: '读取最新名称', exact: true }).click()
     await expect(dialog()).toContainText('其他窗口已改名')
     await expect(input).toHaveValue('  烟雨江南 · 留存初稿  ')
-    renameFailure = 0
+    const accepted = page!.waitForResponse(value => value.url().endsWith('/versions/1/name') && value.request().method() === 'PATCH')
     await dialog().getByRole('button', { name: '以我的名称重新提交', exact: true }).click()
+    assert.equal((await accepted).status(), 200)
     await expect(dialog()).toContainText('烟雨江南 · 留存初稿')
+    const stored = (await list()).find(item => item.version === 1)!
+    assert.equal(stored.name, '烟雨江南 · 留存初稿')
+    assert.equal(stored.nameSource, 'user')
+    assert.equal(stored.nameRevision, original.nameRevision + 2)
+    assert.equal(stored.parentVersionId, original.parentVersionId)
+    assert.deepEqual(stored.diffJson, original.diffJson)
+    assert.deepEqual(await detail(), beforePlan, '历史版改名不能改当前指针、正式内容或更新时间')
     assert.deepEqual(await snapshotState(), before, 'Rename changed plan version/revision or node count')
     await page!.screenshot({ path: join(artifacts, 'renamed-history.png'), fullPage: true, animations: 'disabled' })
     await closePreview(); await page!.reload(); await openRoadmap()
     await page!.getByRole('button', { name: '加载更早的版本', exact: true }).click(); await expect(page!.locator('.roadmap__node')).toHaveCount(66)
     await openVersion(1); await expect(dialog()).toContainText('烟雨江南 · 留存初稿'); await closePreview()
+    assert.deepEqual(await snapshotState(), before)
   })
   await step('窄屏真实触摸平移、双指缩放、取消与长名称布局', async () => {
     await page!.setViewportSize({ width: 390, height: 844 }); await openRoadmap()
@@ -384,9 +372,73 @@ try {
     assert(mock.state.edits > 0)
     const after = await snapshotState()
     assert.equal(after.count, before.count + 1)
-    await expect(page!.locator('.preview-card').first()).toBeVisible()
+    const completedMessage = page!.locator('.chat-message--assistant').last()
+    await expect(completedMessage.locator('.preview-card')).toHaveCount(1)
+    await expect(completedMessage.locator('.preview-card__badge')).toHaveText(`v${after.version}`)
     await expect(page!.locator('.preview-card').getByRole('button', { name: /保存/ })).toHaveCount(0)
     await page!.screenshot({ path: join(artifacts, 'ai-generated-preview.png'), fullPage: true, animations: 'disabled' })
+  })
+  await step('失败部分成果可预览，恢复前并发修改必须比较后明确提交', async () => {
+    const baseline = await detail()
+    const before = await snapshotState()
+    await page!.locator('#travel-message').fill('部分成果恢复验收：先修改简介，再模拟上游失败')
+    await page!.getByRole('button', { name: '发送消息', exact: true }).click()
+    await expect.poll(async () => (await api<{ status: string }[]>(`/api/chat/runs?conversationId=${conversationId}`))[0]?.status, { timeout: 45000 }).toBe('failed')
+    const card = page!.locator('.chat-message--assistant').last().locator('.preview-card')
+    await expect(card).toHaveCount(1)
+    await expect(card).toContainText('未完成草稿')
+    await expect(card.getByRole('button', { name: '切换到此版本', exact: true })).toHaveCount(0)
+    const afterFailure = await detail()
+    assert.equal(afterFailure.version, before.version)
+    assert.deepEqual(afterFailure.plan, baseline.plan)
+    assert.equal((await list()).length, before.count)
+    assert(afterFailure.revision > baseline.revision, '已持久化草稿推进 revision，但不替换正式快照')
+    const partial = (await api<{ drafts: { id: number; status: string; messageId: number }[] }>(`/api/plans/${planId}/drafts`)).drafts
+    assert.equal(partial.length, 1)
+    assert.equal(partial[0]!.status, 'recoverable')
+    const draftId = partial[0]!.id
+    await card.getByRole('button', { name: '查看完整草稿', exact: true }).click()
+    await expect(page!.locator('.draft-preview')).toBeVisible()
+    await expect(dialog()).toContainText('隔离恢复草稿：未完成的西湖安排')
+    await expect(dialog().getByRole('region', { name: '当前正式版本', exact: true })).toContainText(baseline.plan.summary)
+    await closePreview()
+    assert.deepEqual(await detail(), afterFailure, '只读预览和关闭不能切换正式行程')
+
+    await card.getByRole('button', { name: '查看完整草稿', exact: true }).click()
+    await expect(dialog().getByRole('button', { name: '确认恢复这份草稿', exact: true })).toBeEnabled()
+    await api(`/api/plans/${planId}`, 'PATCH', { summary: '恢复前另一窗口的有效修改', expectedVersion: afterFailure.version, expectedRevision: afterFailure.revision })
+    const concurrent = await detail()
+    const concurrentCount = (await list()).length
+    const rejected = page!.waitForResponse(value => value.url().endsWith(`/drafts/${draftId}/restore`) && value.request().method() === 'POST')
+    page!.once('dialog', prompt => prompt.accept())
+    await dialog().getByRole('button', { name: '确认恢复这份草稿', exact: true }).click()
+    assert.equal((await rejected).status(), 409)
+    await expect(dialog()).toContainText('当前行程已变化')
+    await expect(dialog()).toContainText('隔离恢复草稿：未完成的西湖安排')
+    assert.deepEqual(await detail(), concurrent)
+    await dialog().getByRole('button', { name: '读取最新行程并比较', exact: true }).click()
+    await expect(dialog().getByRole('region', { name: '当前正式版本', exact: true })).toContainText('恢复前另一窗口的有效修改')
+    const accepted = page!.waitForResponse(value => value.url().endsWith(`/drafts/${draftId}/restore`) && value.request().method() === 'POST')
+    page!.once('dialog', prompt => prompt.accept())
+    await dialog().getByRole('button', { name: '确认恢复这份草稿', exact: true }).click()
+    assert.equal((await accepted).status(), 200)
+    await expect.poll(async () => (await detail()).plan.summary).toBe('隔离恢复草稿：未完成的西湖安排')
+    const restored = await detail(), versions = await list()
+    assert.equal(versions.length, concurrentCount + 1)
+    assert.equal(restored.version, concurrent.version + 1)
+    assert.equal(versions.find(version => version.version === restored.version)?.parentVersionId, versions.find(version => version.version === concurrent.version)?.id)
+    const historic = await api<{ plan: PlanDetail['plan'] }>(`/api/plans/${planId}/versions/${baseline.version}`)
+    assert.deepEqual(historic.plan, baseline.plan, '恢复不能改写上一成功历史版')
+    assert.equal((await api<{ plan: PlanDetail['plan'] }>(`/api/plans/${planId}/versions/${concurrent.version}`)).plan.summary, concurrent.plan.summary)
+    assert.equal((await api<{ drafts: unknown[] }>(`/api/plans/${planId}/drafts`)).drafts.length, 0)
+    if (await dialog().count()) await closePreview()
+    await expect(page!.locator('.chat-message--assistant').last().locator('.preview-card__badge')).toHaveText(`已恢复 · v${restored.version}`)
+    await page!.reload()
+    await (await folder()).locator('.conversation-row .row').first().click()
+    await page!.getByRole('tab', { name: '旅途对话', exact: true }).click()
+    await expect(page!.locator('.chat-message--assistant').last().locator('.preview-card__badge')).toHaveText(`已恢复 · v${restored.version}`)
+    assert.deepEqual(await detail(), restored)
+    await page!.screenshot({ path: join(artifacts, 'recoverable-draft-restored.png'), fullPage: true, animations: 'disabled' })
   })
   assert.deepEqual(pageErrors, [])
   passed = true
@@ -397,7 +449,7 @@ try {
 } finally {
   await page?.unrouteAll({ behavior: 'ignoreErrors' }); await browser?.close(); server?.kill(); if (server) await server.exited
   mock.server.stop(true)
-  writeFileSync(join(artifacts, 'report.json'), JSON.stringify({ passed, steps, pageErrors, measurements, mutations, snapshotRequests, model: mock.state, scope: 'Real production Vue UI, Chromium mouse/touch/keyboard, real temporary SQLite, authentication, historical GET, version switch and form saves. Version naming metadata/PATCH are explicit Playwright fixtures pending backend merge; AI is loopback SSE fixture.' }, null, 2))
+  writeFileSync(join(artifacts, 'report.json'), JSON.stringify({ passed, steps, pageErrors, measurements, mutations, snapshotRequests, model: mock.state, scope: 'Real production Vue UI, Chromium mouse/touch/keyboard, temporary SQLite, authentication, historical GET, server-generated naming, metadata persistence, real rename CAS, version switch, form saves and explicit partial-draft recovery with real revision conflicts. Only model responses and explicitly tested network failures use local fixtures; no real AI or user database.' }, null, 2))
   if (stdout) writeFileSync(join(artifacts, 'server.log'), await stdout)
   if (stderr) writeFileSync(join(artifacts, 'server-errors.log'), await stderr)
   const checked = realpathSync(temporary), segment = relative(temporaryRoot, checked)

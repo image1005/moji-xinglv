@@ -24,8 +24,8 @@ import { resolveModelConfiguration } from './model-settings'
 import { resolveAttachments, attachmentModelParts } from './attachments'
 import { modelCapabilities } from '../providers/models'
 
-const FAILURE = '本次生成未完成，请检查 AI 服务配置后重试。已经保存的行程版本会保留。'
-const TIMEOUT = '本次生成超时，已停止等待。已保存内容会保留，请稍后重试或分批安排日程。'
+const FAILURE = '本次生成未完成，请检查 AI 服务配置后重试。上一成功版本会保留，已生成的部分成果可在草稿中查看和恢复。'
+const TIMEOUT = '本次生成超时，已停止等待。上一成功版本会保留，部分成果可在草稿中查看和恢复；请稍后重试或分批安排日程。'
 const TOOL_FAILURE = '工具执行失败，请重新读取当前规划后重试'
 
 export async function executeChat(event: H3Event, user: { id: string; name: string; email: string }, body: ChatRequest) {
@@ -184,8 +184,8 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
             const lastMutation = toolCalls.findLast(call => typeof call.name === 'string' && MUTATION_TOOLS.has(call.name))
             if (part.finishReason === 'length' || part.finishReason === 'tool-calls' || lastMutation?.error) {
               failed = true
-              failureMessage = part.finishReason === 'length' ? '本轮思考与正文达到输出上限，行程尚未全部完成。已保存版本会保留，请按天分批继续，或联系管理员调整输出预算。'
-                : lastMutation?.error ? `行程编排未完成：${lastMutation.error} 已保存版本会保留。` : '本轮达到工具步骤上限，已保存部分会保留，请继续完成剩余行程。'
+              failureMessage = part.finishReason === 'length' ? '本轮思考与正文达到输出上限，行程尚未全部完成。上一成功版本会保留，部分成果可在草稿中查看和恢复；请按天分批继续，或联系管理员调整输出预算。'
+                : lastMutation?.error ? `行程编排未完成：${lastMutation.error} 上一成功版本会保留，部分成果可在草稿中查看和恢复。` : '本轮达到工具步骤上限，部分成果已保留为恢复草稿，请查看后恢复或继续完成剩余行程。'
               controller.enqueue({ type: 'error', errorText: failureMessage })
             }
           }

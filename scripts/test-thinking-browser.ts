@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import { chromium, expect, type Browser, type Locator, type Page } from '@playwright/test'
 import type { ModelConfiguration, ModelCapabilities } from '../shared/schemas/model-config'
+import type { PlanDetail, VersionItem } from '../shared/schemas/workspace'
 import { startThinkingModel } from './mock-thinking-ai'
 
 assert(existsSync('.output/server/index.mjs'), '请先执行 bun run build')
@@ -99,6 +100,8 @@ async function persisted(thinking: ModelConfiguration['thinking'], webSearch: bo
   }).toEqual({ thinking, webSearch })
 }
 async function runChat(instruction = '', expected = 'completed') {
+  const before = await api<PlanDetail>(`/api/plans/${planId}`)
+  const versionsBefore = await api<VersionItem[]>(`/api/plans/${planId}/versions`)
   const marker = `thinking-case-${++counter}`
   await page!.locator('#travel-message').fill(`${marker} ${instruction || '请先核对行笺再给建议，保持旅行内容不变。'}`)
   const response = page!.waitForResponse(value => value.url() === `${origin}/api/chat` && value.request().method() === 'POST')
@@ -113,6 +116,10 @@ async function runChat(instruction = '', expected = 'completed') {
   assert.equal(terminal!.status, expected, `${marker}: ${terminal!.errorCode ?? 'unexpected terminal'}; ${mock.state.rejected.at(-1) ?? ''}`)
   await expect(page!.getByRole('button', { name: '停止生成', exact: true })).toHaveCount(0)
   if (expected === 'completed') await expect(page!.locator('.chat-message').filter({ hasText: `隔离正文已完成 ${marker}。` })).toBeVisible()
+  const after = await api<PlanDetail>(`/api/plans/${planId}`)
+  assert.deepEqual({ version: after.version, revision: after.revision, plan: after.plan }, { version: before.version, revision: before.revision, plan: before.plan }, '只读思考、搜索或失败不能改变正式行程')
+  assert.deepEqual(await api<VersionItem[]>(`/api/plans/${planId}/versions`), versionsBefore, '只读任务不产生版本或重复命名')
+  assert.deepEqual((await api<{ drafts: unknown[] }>(`/api/plans/${planId}/drafts`)).drafts, [], '只读任务不创建草稿')
   return { marker, request, chatResponse }
 }
 async function withinViewport(locator: Locator) {
@@ -190,6 +197,11 @@ try {
     assert(settings.capabilities.search.available)
     await page.goto(origin)
     await openChat()
+    await expect.poll(async () => {
+      const versions = await api<VersionItem[]>(`/api/plans/${planId}/versions`)
+      return versions.length === 1 && versions[0]?.nameSource === 'ai' && versions[0]?.name === '隔离验证行程定稿'
+    }, { timeout: 20000 }).toBe(true)
+    assert.equal(mock.state.namingRequests, 1, '初始版本命名与思考请求分开统计')
   })
   await step('思考菜单键盘、选中状态、Escape 与外部点击焦点', async () => {
     await thinkingButton().focus()

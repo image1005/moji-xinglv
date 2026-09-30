@@ -146,12 +146,16 @@ async function run(config: ReturnType<typeof readConfig>) {
       await expectPlan(1, initial)
     })
 
-    await step('无变化保存保持 v1', async () => {
-      const result = await json<{ skipped: boolean; version: number }>(`/api/plans/${createdPlanId}/save`,
-        post({ expectedVersion: 1, conversationId }))
-      assert.equal(result.skipped, true)
-      assert.equal(result.version, 1)
+    await step('重复无变化保存保持 v1 且不刷消息', async () => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const result = await json<{ skipped: boolean; version: number }>(`/api/plans/${createdPlanId}/save`,
+          post({ expectedVersion: 1, conversationId }))
+        assert.equal(result.skipped, true)
+        assert.equal(result.version, 1)
+      }
       await expectPlan(1, initial)
+      const detail = await json<{ messages: unknown[] }>(`/api/conversations/${conversationId}`)
+      assert.equal(detail.messages.length, 0, '无变化保存不应创建重复系统消息')
     })
 
     await step('保存真实更改和美食、清单字段生成 v2', async () => {
@@ -205,9 +209,9 @@ async function run(config: ReturnType<typeof readConfig>) {
         role: string; content: string; planVersion: number | null;
         preview?: { planId: number; version: number; title: string };
       }[] }>(`/api/conversations/${conversationId}`)
-      assert.equal(detail.messages.length, 4, '失败的参数 / 版本检查不应留下额外消息')
+      assert.equal(detail.messages.length, 3, '无变化保存及失败的参数 / 版本检查不应留下额外消息')
       assert(detail.messages.every((message) => message.role === 'system'))
-      assert.deepEqual(detail.messages.map((message) => message.preview?.version), [1, 2, 1, 3])
+      assert.deepEqual(detail.messages.map((message) => message.preview?.version), [2, 1, 3])
       const switchMessage = detail.messages.find((message) => message.content.includes('已切换到 v1'))
       assert(switchMessage, '未找到切换版本的系统消息')
       assert.equal(switchMessage.planVersion, v1!.id)

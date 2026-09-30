@@ -1,13 +1,16 @@
 /** 回环地址上的 OpenAI 兼容 SSE 测试服务；不访问网络或读取真实 AI 配置。 */
+import { isVersionNameRequest, versionNameFixtureResponse, type VerificationModelRequest } from './model-verification'
+
 export function startMockAi() {
-  const state = { requests: 0, completed: 0, cancelled: 0 }
+  const state = { requests: 0, namingRequests: 0, completed: 0, cancelled: 0 }
   const marker = '浏览器隔离生成已完整结束。'
   const server = Bun.serve({
     hostname: '127.0.0.1', port: 0, idleTimeout: 30,
     async fetch(request) {
       const path = new URL(request.url).pathname
       if (request.method !== 'POST' || !path.endsWith('/chat/completions')) return new Response('not found', { status: 404 })
-      await request.json()
+      const body = await request.json() as VerificationModelRequest
+      if (isVersionNameRequest(body)) { state.namingRequests++; return versionNameFixtureResponse(body) }
       state.requests++
       let finished = false
       let cancelled = false

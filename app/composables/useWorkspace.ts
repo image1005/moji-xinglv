@@ -25,7 +25,7 @@ function createWorkspaceState() {
   const loading = ref(false)
   const errorMessage = ref('')
   const document = createWorkspaceDocument({ navigation: () => navigation, lifetime: () => lifetime, conversationId: () => currentConversationId.value, matchingConversation, reloadConversation: () => reloadConversation(), rememberPlan: (plan) => { plans.value = mergeById(plans.value, [plan]) }, errorMessage })
-  const { versions, currentPlan, offline, savedAt, loadingVersions, versionsHasMore, clearOtherPlan, loadPlan, loadVersions, refreshVersionMetadata, renameVersion, updatePlanMeta, savePlan, switchVersion, ensureOnline, refreshAfterMutation } = document
+  const { versions, currentPlan, offline, savedAt, loadingVersions, versionsHasMore, clearOtherPlan, loadPlan, loadVersions, refreshVersionMetadata, renameVersion, updatePlanMeta, savePlan, switchVersion, restoreDraft, ensureOnline, refreshAfterMutation } = document
   const session = createWorkspaceChat({ navigation: () => navigation, lifetime: () => lifetime, currentPlan, loading, errorMessage, conversations, modelSettings, ensureOnline, newSession, refreshAfterMutation })
   const { chat, currentConversationId, messagesHasMore, loadingHistory, runs, processingStatus, selectConversation, sendMessage, retryMessage, reloadConversation, refreshRuns, loadOlderMessages, stop } = session
   const uiLeftOpen = ref(false)
@@ -252,6 +252,7 @@ function createWorkspaceState() {
     loadVersions: action(loadVersions),
     refreshVersionMetadata,
     renameVersion,
+    restoreDraft,
     loadOlderMessages: action(loadOlderMessages),
     refreshRuns,
     refreshCurrentPlan: action(async () => { if (currentPlan.value) await loadPlan(currentPlan.value.id) }),

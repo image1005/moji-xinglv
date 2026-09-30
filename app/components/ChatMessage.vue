@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PlanPreview } from '#shared/types'
-import type { WorkbenchMessage } from '~/features/workspace/messages'
+import { messagePreview, type WorkbenchMessage } from '~/features/workspace/messages'
 import { SearchSourceSchema } from '#shared/schemas/model-config'
 
 const props = defineProps<{ message: WorkbenchMessage; streaming?: boolean }>()
@@ -25,22 +25,9 @@ interface LoosePart {
   title?: string
 }
 
-const parts = computed(() => {
-  const all = props.message.parts as unknown as LoosePart[]
-  const keys = new Set(all.flatMap((part) => {
-    const preview = toolPreview(part)
-    return preview ? [`${preview.planId}:${preview.version}`] : []
-  }))
-  return all.filter((part) => {
-    if (part.type !== 'data-preview' || !part.data) return true
-    const key = `${part.data.planId}:${part.data.version}`
-    if (keys.has(key)) return false
-    keys.add(key)
-    return true
-  })
-})
+const parts = computed(() => props.message.parts as unknown as LoosePart[])
 const textParts = computed(() => parts.value.filter((p) => p.type === 'text' && p.text))
-const previewParts = computed(() => parts.value.filter((p) => p.type === 'data-preview' && p.data))
+const preview = computed(() => messagePreview(parts.value))
 const toolParts = computed(() => parts.value.filter((p) => p.type.startsWith('tool-')))
 const isUser = computed(() => props.message.role === 'user')
 const isSystem = computed(() => props.message.role === 'system')
@@ -58,14 +45,8 @@ function toolName(part: LoosePart): string {
   return part.type.replace(/^tool-/, '')
 }
 
-function toolPreview(part: LoosePart): PlanPreview | null {
-  if (!part.type.startsWith('tool-') || part.state !== 'output-available') return null
-  const output = part.output as { preview?: PlanPreview } | undefined
-  return output?.preview ?? null
-}
-
 const streamingEmpty = computed(
-  () => props.streaming && props.message.role === 'assistant' && !textParts.value.length && !previewParts.value.length && !toolParts.value.length,
+  () => props.streaming && props.message.role === 'assistant' && !textParts.value.length && !preview.value && !toolParts.value.length,
 )
 </script>
 
@@ -74,7 +55,7 @@ const streamingEmpty = computed(
     <span class="chat-system__seal" aria-hidden="true">笺</span>
     <div class="chat-system__body">
       <p v-for="(part, index) in textParts" :key="index" class="chat-system__text">{{ part.text }}</p>
-      <PreviewCard v-for="(part, index) in previewParts" :key="`p-${index}`" :preview="part.data!" />
+      <PreviewCard v-if="preview" :preview="preview" />
     </div>
   </div>
   <div v-else class="chat-message" :class="isUser ? 'chat-message--user' : 'chat-message--assistant'">
@@ -94,15 +75,9 @@ const streamingEmpty = computed(
           <StreamingMarkdown v-if="!isUser" :value="part.text" :streaming="streaming" />
           <span v-else>{{ part.text }}</span>
         </div>
-        <div v-else-if="part.type === 'data-preview' && part.data" class="chat-message__preview">
-          <PreviewCard :preview="part.data" />
-        </div>
         <a v-else-if="part.type === 'file' && attachmentUrl(part.url)" class="chat-message__file" :href="attachmentUrl(part.url)" target="_blank" rel="noopener noreferrer"><img :src="attachmentUrl(part.url)" :alt="part.filename || '用户上传的旅行图片'" loading="lazy"><span>{{ part.filename || '图片附件' }}</span></a>
         <a v-else-if="part.type === 'source-url' && sourceUrl(part.url)" :href="sourceUrl(part.url)" class="chat-message__source" target="_blank" rel="noopener noreferrer">{{ part.title || part.url }}</a>
         <template v-else-if="part.type.startsWith('tool-')">
-          <div v-if="toolPreview(part)" class="chat-message__preview">
-            <PreviewCard :preview="toolPreview(part)!" />
-          </div>
           <ToolCallCard
             :name="toolName(part)"
             :state="part.state"
@@ -112,6 +87,7 @@ const streamingEmpty = computed(
           />
         </template>
       </template>
+      <div v-if="preview" class="chat-message__preview"><PreviewCard :preview="preview" /></div>
       <details v-if="sources.length" class="chat-message__sources"><summary>联网来源 · {{ sources.length }} 条</summary><article v-for="source in sources" :key="source.url"><a :href="source.url" target="_blank" rel="noopener noreferrer">{{ source.title }}</a><p>{{ source.summary || '搜索提供方未返回明文摘要，可打开来源查看。' }}</p><small>{{ source.provider }} · 获取于 {{ new Date(source.fetchedAt).toLocaleString('zh-CN') }}</small></article></details>
 
       <!-- 生成中空状态等待水墨微波 -->

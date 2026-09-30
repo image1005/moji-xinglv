@@ -257,6 +257,12 @@ try {
       const result = await api<{ messages: { content: string }[] }>('GET', `/api/conversations/${conversationId}`)
       return result.messages.some((message) => message.content.includes(mock.marker))
     }, { timeout: 25000 }).toBe(true)
+    // A checkpoint may persist the last text delta before the upstream stop frame.
+    await expect.poll(async () => {
+      const runs = await api<{ status: string }[]>('GET', `/api/chat/runs?conversationId=${conversationId}`)
+      return runs[0]?.status
+    }, { timeout: 15000 }).toBe('completed')
+    await expect.poll(() => mock.state.completed).toBe(1)
     assert.equal(mock.state.requests, 1)
     assert.equal(mock.state.completed, 1)
     assert.equal(mock.state.cancelled, 0)

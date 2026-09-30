@@ -221,6 +221,23 @@ export function createWorkspaceDocument(context: {
     await refreshAfterMutation(plan.id, conversationId, token)
   }
 
+  // A recovery uses the snapshot the user compared, never a newer revision inferred at click time.
+  async function restoreDraft(draftId: number, expectedVersion: number, expectedRevision: number) {
+    ensureOnline()
+    const plan = currentPlan.value
+    if (!plan) return null
+    const token = context.navigation()
+    const epoch = context.lifetime()
+    const valid = () => token === context.navigation() && epoch === context.lifetime() && currentPlan.value?.id === plan.id
+    const conversationId = context.matchingConversation(plan.id)
+    const result = await api.plans.restoreDraft(plan.id, draftId, { expectedVersion, expectedRevision, conversationId })
+    if (!valid()) return null
+    await refreshAfterMutation(plan.id, conversationId, token)
+    if (!valid()) return null
+    await loadVersions(false, true)
+    return valid() ? result : null
+  }
+
   function invalidate() { planRequest++ }
 
   function reset() {
@@ -235,5 +252,5 @@ export function createWorkspaceDocument(context: {
     versionsHasMore.value = loadingVersions.value = false
   }
 
-  return { versions, currentPlan, offline, savedAt, loadingVersions, versionsHasMore, clearOtherPlan, loadPlan, loadVersions, refreshVersionMetadata, renameVersion, updatePlanMeta, savePlan, switchVersion, ensureOnline, refreshAfterMutation, invalidate, reset }
+  return { versions, currentPlan, offline, savedAt, loadingVersions, versionsHasMore, clearOtherPlan, loadPlan, loadVersions, refreshVersionMetadata, renameVersion, updatePlanMeta, savePlan, switchVersion, restoreDraft, ensureOnline, refreshAfterMutation, invalidate, reset }
 }

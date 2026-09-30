@@ -3,7 +3,7 @@ import type { MessageRecord, PlanPreview } from '#shared/types'
 import { VersionMetadataSchema, VersionNameInputSchema, type VersionMetadata } from './version-metadata'
 
 import type { PlanListItem, PlanDetail, ConversationItem, SaveResult, ChatRun, Page } from '#shared/schemas/workspace'
-import { PlanListItemSchema, PlanDetailSchema, ConversationSchema, SaveResultSchema, ChatRunSchema, MessageSchema, pageSchema } from '#shared/schemas/workspace'
+import { PlanListItemSchema, PlanDetailSchema, ConversationSchema, SaveResultSchema, ChatRunSchema, MessageSchema, PlanDraftDetailSchema, pageSchema } from '#shared/schemas/workspace'
 export type { SessionUser, PlanDetail, PlanListItem, ConversationItem, SaveResult } from '#shared/schemas/workspace'
 type MessagePage = Pick<Page<never>, 'nextCursor' | 'hasMore'>
 
@@ -54,6 +54,10 @@ export const api = {
     versionsPage: (id: number, cursor?: string) => $fetch<Page<VersionMetadata>>(`/api/plans/${id}/versions`, { query: { paged: true, limit: 50, cursor } }).then(result => pageSchema(VersionMetadataSchema).parse(result)),
     versionPlan: (id: number, version: number) =>
       $fetch<{ plan: Plan | null }>(`/api/plans/${id}/versions/${version}`).then(result => ({ plan: PlanSchema.nullable().parse(result.plan) })),
+    draftPlan: (id: number, draftId: number) =>
+      $fetch<{ draft: unknown }>(`/api/plans/${id}/drafts/${draftId}`).then(result => ({ draft: PlanDraftDetailSchema.parse(result.draft) })),
+    restoreDraft: (id: number, draftId: number, body: { expectedVersion: number; expectedRevision: number; conversationId?: number }) =>
+      $fetch<SaveResult>(`/api/plans/${id}/drafts/${draftId}/restore`, { method: 'POST', body }).then(result => SaveResultSchema.parse(result)),
     renameVersion: (id: number, version: number, body: { name: string; expectedNameRevision: number }) =>
       $fetch<{ version: VersionMetadata }>(`/api/plans/${id}/versions/${version}/name`, {
         method: 'PATCH', body: VersionNameInputSchema.parse(body),

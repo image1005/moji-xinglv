@@ -1,14 +1,17 @@
 /** Local DeepSeek-shaped stream; asserts the documented reasoning/tool continuation contract. */
+import { isVersionNameRequest, versionNameFixtureResponse } from './model-verification'
+
 export function startThinkingModel(options: { reasoningMs: number; stallMs: number }) {
   type Message = { role: string; content: string | { type: string; text?: string }[]; reasoning_content?: string; tool_calls?: { function: { name: string } }[] }
   type Payload = { model: string; thinking?: { type: string }; reasoning_effort?: string; max_tokens?: number; messages: Message[]; tools?: { function: { name: string } }[] }
   const state = {
     requests: [] as { marker: string; thinking?: string; effort?: string; maxTokens?: number; searchEnabled: boolean; continuation: boolean; reasoningPreserved: boolean }[],
-    completed: 0, cancelled: 0, tools: [] as string[], rejected: [] as string[],
+    namingRequests: 0, completed: 0, cancelled: 0, tools: [] as string[], rejected: [] as string[],
   }
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 120, async fetch(request) {
     if (request.method !== 'POST' || !new URL(request.url).pathname.endsWith('/chat/completions')) return new Response('not found', { status: 404 })
     const body = await request.json() as Payload
+    if (isVersionNameRequest(body)) { state.namingRequests++; return versionNameFixtureResponse(body) }
     const userIndex = body.messages.findLastIndex(message => message.role === 'user')
     const user = body.messages[userIndex]!
     const text = typeof user.content === 'string' ? user.content : user.content.filter(part => part.type === 'text').map(part => part.text).join('')

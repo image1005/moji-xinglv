@@ -1,9 +1,12 @@
 /** Deterministic provider fixture. Tool execution, persistence and UI remain real. */
+import { isVersionNameRequest, versionNameFixtureResponse } from './model-verification'
+
 export function startProductModel() {
-  const state = { requests: 0, imageRequests: 0, searches: 0, edits: 0, settings: [] as { thinking?: unknown; effort?: unknown }[] }
+  const state = { requests: 0, namingRequests: 0, imageRequests: 0, searches: 0, edits: 0, settings: [] as { thinking?: unknown; effort?: unknown }[] }
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, idleTimeout: 60, async fetch(request) {
     if (!new URL(request.url).pathname.endsWith('/chat/completions')) return new Response('not found', { status: 404 })
-    const body = await request.json() as { thinking?: unknown; reasoning_effort?: unknown; messages: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[]; tool_call_id?: string; tool_calls?: { function: { name: string } }[] }[]; tools?: { function: { name: string } }[] }
+    const body = await request.json() as { model?: string; stream?: boolean; thinking?: unknown; reasoning_effort?: unknown; messages: { role: string; content: string | { type: string; text?: string; image_url?: { url: string } }[]; tool_call_id?: string; tool_calls?: { function: { name: string } }[] }[]; tools?: { function: { name: string } }[] }
+    if (isVersionNameRequest(body)) { state.namingRequests++; return versionNameFixtureResponse(body) }
     state.requests++
     state.settings.push({ thinking: body.thinking, effort: body.reasoning_effort })
     const system = body.messages.filter(m => m.role === 'system').map(m => m.content).join('\n')
@@ -27,11 +30,15 @@ export function startProductModel() {
     const imageCount = body.messages.reduce((count, message) => count + (Array.isArray(message.content) ? message.content.filter(p => p.type === 'image_url' && p.image_url?.url.startsWith('data:image/')).length : 0), 0)
     if (imageCount) state.imageRequests++
     const calls = body.messages.slice(latestUser + 1).flatMap(message => message.tool_calls?.map(call => call.function.name) ?? [])
+    const recoverableDraft = userText.includes('部分成果恢复验收')
+    if (recoverableDraft && calls.includes('apply_plan_edits')) return Response.json({ error: { message: '隔离夹具：工具草稿保存后供应商失败', type: 'server_error' } }, { status: 503 })
     const canSearch = body.tools?.some(tool => tool.function.name === 'search_web')
-    const tool = canSearch && !calls.includes('search_web') ? 'search_web' : !calls.includes('apply_plan_edits') ? 'apply_plan_edits' : null
+    const tool = !recoverableDraft && canSearch && !calls.includes('search_web') ? 'search_web' : !calls.includes('apply_plan_edits') ? 'apply_plan_edits' : null
     if (tool === 'search_web') state.searches++
     if (tool === 'apply_plan_edits') state.edits++
-    const edits = /调整|菜单|截图/.test(userText)
+    const edits = recoverableDraft
+      ? [{ target: 'plan', action: 'update', value: { summary: '隔离恢复草稿：未完成的西湖安排' } }]
+      : /调整|菜单|截图/.test(userText)
       ? [{ target: 'plan', action: 'update', value: { summary: `隔离测试：已按图片追问调整行程（${imageCount} 张上下文图片）` } }]
       : [
           { target: 'plan', action: 'update', value: { summary: '隔离模拟数据：杭州图文行程，所有供应商数据仅供工程验收' } },

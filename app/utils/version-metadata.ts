@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { VersionSchema, type VersionItem } from '#shared/schemas/workspace'
+import { RenameVersionSchema, VersionSchema, type VersionItem } from '#shared/schemas/workspace'
 
 // Frontend compatibility boundary while the shared backend contract is merged separately.
 export const VersionMetadataSchema = VersionSchema.extend({
@@ -9,10 +9,7 @@ export const VersionMetadataSchema = VersionSchema.extend({
 })
 export type VersionMetadata = VersionItem & z.infer<typeof VersionMetadataSchema>
 
-export const VersionNameInputSchema = z.object({
-  name: z.string().trim().refine(value => Array.from(value).length >= 1 && Array.from(value).length <= 40, '版本名称须为 1–40 字'),
-  expectedNameRevision: z.number().int().nonnegative(),
-})
+export const VersionNameInputSchema = RenameVersionSchema
 
 export function versionName(item: { version: number; name?: string | null }) {
   return item.name?.trim() || `v${item.version}`
