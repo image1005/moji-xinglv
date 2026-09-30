@@ -13,6 +13,7 @@ export const PlanResourceSchema = z.strictObject({
   entityId: z.string(), entityType: z.enum(['spot', 'food', 'city']), name: z.string(), city: z.string(),
   status: z.enum(['pending', 'ready', 'failed', 'not_found']),
   image: ResourceImageSchema.nullable(), location: ResourceLocationSchema.nullable(), error: z.string().nullable(),
+  imageResolverVersion: z.number().int().nonnegative().optional(),
   imageIssue: z.strictObject({
     code: z.enum(['no_match', 'timeout', 'rate_limited', 'network', 'invalid_response', 'unavailable', 'configuration']),
     message: z.string().max(300),

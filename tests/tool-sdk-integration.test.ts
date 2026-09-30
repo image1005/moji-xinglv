@@ -127,7 +127,7 @@ describe('真实 Mastra 工具与 AI SDK v5 离线集成', () => {
 
   it('合法 get_plan 参数按当前 Mastra execute(input) 签名读取并返回规划', async () => {
     const chunks = await runTool('get_plan', { planId })
-    expect(mocks.getPlanSnapshot).toHaveBeenCalledWith('offline-owner', planId)
+    expect(mocks.getPlanSnapshot).toHaveBeenCalledWith('offline-owner', planId, 101)
     expect(chunks).toContainEqual({
       type: 'tool-output-available', toolCallId: 'offline-call',
       output: { ok: true, planId, version: 1, revision: 1, plan },

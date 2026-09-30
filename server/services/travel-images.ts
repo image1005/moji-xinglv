@@ -4,13 +4,16 @@ import { mediaIdentity, mediaNameKey, mentionsMediaSubject } from '../providers/
 import { searchTencentImages, tencentImageSearchEnabled } from '../providers/tencent-images'
 import { getResourceImageBytes, trustedImageOrigin, type AcquiredImage } from './media-image'
 import { acquireWikimediaImage } from './wikimedia'
+import { acquireWikidataImage } from './wikidata-images'
+import { acquireOpenverseImage } from './openverse-images'
 import { getCachedJson, setCachedJson } from './cache'
 
+export const IMAGE_RESOLVER_VERSION = 2
 const resolving = new Map<string, Promise<AcquiredImage | null>>()
 
 export async function acquireTravelImage(entity: PlanEntity, retryMissing = false): Promise<AcquiredImage | null> {
   const identity = mediaIdentity(entity)
-  const key = await hashKey('travel-image-selection-v1', { ...identity, type: entity.entityType, address: entity.address, tencent: tencentImageSearchEnabled() })
+  const key = await hashKey('travel-image-selection-v2', { ...identity, type: entity.entityType, address: entity.address, tencent: tencentImageSearchEnabled() })
   const existing = resolving.get(key)
   if (existing) return existing
   const job = (async () => {
@@ -27,12 +30,18 @@ export async function acquireTravelImage(entity: PlanEntity, retryMissing = fals
 }
 
 async function resolveTravelImage(entity: PlanEntity, retryMissing: boolean): Promise<AcquiredImage | null> {
-  let wikiError: unknown
-  try { const image = await acquireWikimediaImage(entity, retryMissing); if (image) return image } catch (error) { wikiError = error }
-  if (!tencentImageSearchEnabled()) { if (wikiError) throw wikiError; return null }
-  const signal = AbortSignal.timeout(20_000)
+  const deadline = AbortSignal.timeout(60_000)
+  const errors: unknown[] = []
+  // Every free source gets a chance after a miss or outage. Paid lookup is opt-in.
+  for (const acquire of [acquireWikidataImage, acquireWikimediaImage, acquireOpenverseImage]) {
+    deadline.throwIfAborted()
+    try { const image = await acquire(entity, retryMissing, deadline); if (image) return image } catch (error) { errors.push(error) }
+  }
+  if (!tencentImageSearchEnabled()) { if (errors.length) throw errors[0]; return null }
+  deadline.throwIfAborted()
+  const signal = AbortSignal.any([deadline, AbortSignal.timeout(20_000)])
   const identity = mediaIdentity(entity)
-  const candidates = await searchTencentImages(`${identity.city} ${identity.primary} ${entity.entityType === 'food' ? '美食 实拍' : '实景'}`)
+  const candidates = await searchTencentImages(`${identity.city} ${identity.primary} ${entity.entityType === 'food' ? '美食 实拍' : '实景'}`, signal)
   let failed: unknown, attempts = 0
   for (const candidate of candidates) {
     const subject = identity.names.find(name => mentionsMediaSubject(candidate.title, name))
@@ -54,6 +63,6 @@ async function resolveTravelImage(entity: PlanEntity, retryMissing: boolean): Pr
     } catch (error) { failed = error }
   }
   if (failed) throw failed
-  if (wikiError) throw wikiError
+  if (errors.length) throw errors[0]
   return null
 }

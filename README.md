@@ -43,7 +43,7 @@
 - 输入文字，或选择、拖拽、粘贴图片；上传支持预览、移除、进度及失败重试，纯图片也可发送，刷新后恢复附件和后续追问。
 - 联网开关与关闭／轻量／标准／深度思考独立配置，按模型真实能力禁用不支持项，默认设置和每轮快照持久化；联网支持 DeepSeek 官方搜索或独立 Tavily 工具，明确展示来源。
 - DeepSeek 官方模型支持情况以官方文档与真实请求验证为依据，兼容网关采用保守能力配置，不静默丢弃图片或伪装思考深度。
-- 行程和预览展示摘要、每日安排、城市图、景点图、美食图与多城市地图。免费 Wikimedia 来源未命中时，可接入腾讯云联网文搜图补充，图片实际下载解码并保留来源；地图使用可信 BD09 坐标，未知地点保留待定位。配置与覆盖边界见 [图片修复说明](docs/MEDIA_COVERAGE_FIX.md)。
+- 行程和预览展示摘要、每日安排、城市图、景点图、美食图与多城市地图。默认依次使用免密钥的 Wikidata、Wikimedia 与 Openverse，图片实际下载解码并保留来源；腾讯云仅在显式配置后作为补充。地图使用可信 BD09 坐标，未知地点保留待定位。免费来源与验证方式见 [免费图片说明](docs/FREE_IMAGE_PROVIDERS.md)。
 - 应用聊天收发为版本化 JSONL，文件独立上传；AI SDK 管理聊天消息与状态，Mastra 负责工具编排。
 
 **工作区工作台**
@@ -58,14 +58,14 @@
 **AI 编辑与版本**
 
 - AI 通过当前工作区作用域内的 Mastra 工具读取规划、提交原子编辑（`apply_plan_edits`）、兜底 patch、获取街景及检索本地景点；不提供全量覆盖工具
-- 工具执行侧维护读取时的修订号；结构化编辑在事务内校验，冲突返回 409 后重读，避免同一版本被原地更新后的旧内容覆盖
+- 工具执行侧维护读取时的修订号；结构化编辑在事务内校验，冲突返回 409，保留生成草稿供用户比较后恢复，避免旧内容覆盖后续编辑
 - 只接受结构化 patch（RFC 7396），服务端 Zod 校验后合并生成新版本，禁止用模型文本整体覆盖
 - 字段契约为严格模式：未知字段返回 400 并给出改名提示（如 `stay → lodging`），不静默丢弃；全部字段在可视化表单中编辑，不提供 JSON 源码编辑
 - 保存与切换版本携带 `expectedVersion` 和单调递增的 `expectedRevision`；409 保留手工草稿，用户比较后决定如何应用
 - 行程新增 `foodJournal` 美食手账与 `checklist` 出行清单（默认空数组）；景点支持地址、类别、停留时长、花费，未知经纬度为 `null`，由用户人工补全
 - 聊天流每次编辑插入可视化预览卡片（摘要 / 每日安排 / 街景缩略图，可复制、Diff、切换版本）
 - 版本只增不减：历史永不删除；「切换到此版本」只移动当前版本指针，之后编辑会从该版本分叉（版本路线图可视化）
-- 一轮对话只保留一个版本：同一轮内的多次原子编辑合并到同一版本，避免版本噪声
+- 一轮对话只提交一个正式版本：同轮编辑先保存为运行草稿，完成后保存最终有效结果；失败或停止保留上一成功版本与可恢复草稿。版本支持 AI 命名、人工改名和只读历史预览
 - 「版本路线」页签：以多叉树展示版本脉络，支持缩放、平移与点击节点直接切换当前版本
 - 同一工作区内查看预览、版本或设置时继续生成，提供持续可见的停止入口；跨工作区或会话切换时停止
 - 创建引导可整理目的地、天数、人数、预算与节奏；行程总览提示日期、重复地点、时间重叠、日程密度、坐标与预算问题
@@ -79,7 +79,8 @@
 
 **百度代理与双层缓存**
 
-- 百度地图影像由服务端代理静态图 `staticimage/v2`（含标记与每日顺序连线）与街景 `panorama/v2`，地点服务同样仅在服务端访问，AK 不进前端
+- 城市舆图使用百度 JSAPI 4.0，支持拖动、滚轮/双指缩放、清晰编号、相邻点合并及地点清单联动；需要独立浏览器端 AK，未配置时明确显示静态预览
+- 百度静态图 `staticimage/v2` 与街景 `panorama/v2` 由服务端代理，地点服务同样仅在服务端访问，服务端 AK 不进前端
 - 顺序连线展示游览顺序，不提供道路导航或预计用时；原 search_poi 保留规划内检索，资源服务按城市、名称、地址调用百度在线地点接口消歧
 - 未知坐标保持 `null` 并提示人工补全；未配置地图 key 时友好提示，行程 / 美食 / 清单仍可编辑
 - 后端：Nitro storage（L1）+ SQLite `cache` 表（L2），`key = hash(api + params)`，校验 `expires_at`，按容量分批回收；历史 `panoramas` 表仅兼容保留
@@ -148,6 +149,7 @@ bun dev
 | `bun run test:recovery` | 真实工具提交后强制终止独立服务并重启，验证恢复和幂等性 |
 | `bun run test:browser` | 构建后运行 Chromium + 本地模拟 AI 验收，报告在 `.verification/browser/` |
 | `bun run test:product` | 隔离生产构建图文流程：JSONL、图片上传、搜索／思考参数、资源、地图、刷新和权限；外部供应商使用明确标注的模拟 |
+| `bun run test:city-map` | 城市地图浏览器验收：标记、拖动、缩放、重叠选择、城市/日期切换、手机布局与失败回退；SDK 和底图为隔离模拟 |
 | `bun run verify:media` | 临时数据库历史迁移、附件权限、稳定实体与资源写回验证 |
 | `bun run verify:providers --real` | 少量真实供应商能力探测，可能产生 API 用量；省略 --real 仅报告配置 |
 | `bun run check:release` | 依次执行代码检查、构建、HTTP、进程恢复及浏览器验收 |
@@ -164,6 +166,7 @@ bun dev
 | 变量 | 说明 |
 | --- | --- |
 | `BAIDU_MAP_AK` | 百度服务端 AK；全景需申请 “for server” 类型。仅 `server/services/baidu.ts` 读取 |
+| `NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK` | 城市交互地图专用浏览器端 AK；独立创建浏览器应用并配置 Referer 白名单。允许公开，不能填写服务端 AK。配置后重启开发服务 |
 | `AUTH_SECRET` / `BETTER_AUTH_URL` | Better Auth 会话密钥与外部地址 |
 | `SEED_ADMIN_EMAIL` / `SEED_ADMIN_PASSWORD` | 显式配置种子管理员；不在页面或文档公开密码 |
 | `SMOKE_EMAIL` / `SMOKE_PASSWORD` | 已有专用测试账号凭据，smoke 无默认值 |
@@ -174,7 +177,10 @@ bun dev
 | `AI_PROVIDER` / `AI_SUPPORTS_VISION` | 自定义网关显式选择 DeepSeek provider；其他网关视觉须经部署者验证后开启 |
 | `AI_SEARCH_PROVIDER` | `auto`（默认）：优先 Tavily，否则使用官方 DeepSeek 密钥搜索；可显式指定 `deepseek`、`tavily` 或 `off` |
 | `TAVILY_API_KEY` | 可选的独立 Tavily 搜索；使用官方 DeepSeek 搜索时无需此配置 |
-| `AI_INPUT_MAX_BYTES` / `AI_OUTPUT_MAX_TOKENS` | 默认 96000 字节输入预算 / 4096 输出 token；输入预算包含规则、工具契约和工具结果 |
+| `AI_INPUT_MAX_BYTES` / `AI_OUTPUT_MAX_TOKENS` | 默认 96000 字节普通输入预算 / 4096 非思考输出 token；普通输入包含规则、工具契约和工具结果 |
+| `AI_THINKING_OUTPUT_MAX_TOKENS` / `AI_REASONING_MAX_BYTES` | 思考模式默认每步 32768 个总输出 token（含思考、正文、工具参数）；协议要求完整回传的思考内容另限 262144 字节，不截断思考或降低档位 |
+| `AI_RUN_TIMEOUT_MS` | 整轮默认 180000 毫秒，包含排队、思考和工具，超时明确失败；范围 1000–600000 |
+| `AI_DEEPSEEK_THINKING_LEVELS` | 兼容网关配合 `AI_PROVIDER=deepseek` 使用；仅填写已核实档位，如 `off,light,standard,deep`。留空不启用思考能力；官方接口按已核实能力提供 |
 | `AI_GLOBAL_CONCURRENCY` / `AI_USER_CONCURRENCY` | 默认同时生成 4 / 1 个任务 |
 | `AI_QUEUE_LIMIT` / `AI_QUEUE_WAIT_MS` | 默认队列 8 个、等待上限 10000ms |
 | `AI_REQUESTS_PER_PERIOD` / `AI_GLOBAL_REQUESTS_PER_PERIOD` / `AI_PERIOD_SECONDS` | 默认每用户 60 次、全局 1000 次 / 3600 秒；限额返回 429 |
@@ -234,7 +240,7 @@ CI 使用 dummy 配置与测试数据库，执行冻结锁文件安装、check�
 | 验收标准 | 实现 / 验证方式 |
 | --- | --- |
 | `bun install && bun dev` 可运行，`bun run build` 可构建 | 执行检查与构建；独立测试环境另行运行 `bun run smoke`，据实际输出报告 |
-| 百度 AK 不出现在前端 | 仅服务端代理；构建后扫描前端产物，不将设计约束视为已验收 |
+| 百度服务端 AK 不出现在前端 | 定位、静态图和街景通过服务端代理；交互地图使用独立的公开浏览器端 AK。构建后扫描服务端密钥，不将设计约束视为已验收 |
 | 重复请求命中缓存，不重复调用百度 | `cache` 表 + 前端 IndexedDB；响应头 `x-cache: HIT/MISS` |
 | AI 连续编辑 JSON，每次出现预览 | 工具返回 `preview`，聊天流渲染 `PreviewCard`，落库 `messages.preview_json` |
 | 规划可保存 / 排序 / 编辑 / 删除 / 版本切换 | 左栏工作区 CRUD + 版本历史 + 版本路线图（只增不减） |
@@ -252,7 +258,7 @@ CI 使用 dummy 配置与测试数据库，执行冻结锁文件安装、check�
 
 ## 安全
 
-- `BAIDU_MAP_AK` 只允许在 `server/services/baidu.ts` 读取；前端 bundle 不含 AK / `AUTH_SECRET` / `AI_API_KEY` 的值
+- `BAIDU_MAP_AK` 只允许在 `server/services/baidu.ts` 读取；前端 bundle 不含服务端 AK / `AUTH_SECRET` / `AI_API_KEY` 的值。`NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK` 是独立公开浏览器配置，需限制 Referer
 - 密钥仅存 `.env`（已忽略提交），并保持 `.env.example` 同步
 - `/admin/**` 由服务端 middleware 与 API 双重校验，角色以服务端 Session 为准
 

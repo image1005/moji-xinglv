@@ -6,7 +6,7 @@ it.each([
   ['identity', '同一请求完成、停止与中断后都不能重复执行，且身份隔离'],
   ['queue', '全局并发和用户并发限制、队列满、等待释放'],
   ['quota', '持久周期额度和 Retry-After'],
-  ['checkpointRecovery', '工具提交后进程中断恢复预览，检查点不破坏版本'],
+  ['checkpointRecovery', '工具草稿检查点在重启后可恢复，上一成功版本不变'],
   ['metrics', '一次外部成功、两次缓存命中和一次失败可对账'],
   ['initialRequirements', '长会话保留最早需求的来源且跨用户不可读取'],
 ])('%s：%s', name => {

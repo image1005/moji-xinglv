@@ -1,0 +1,480 @@
+{
+  "passed": true,
+  "runId": "2026-09-30T01-34-44-228Z",
+  "reasoningMs": 50000,
+  "runTimeoutMs": 65000,
+  "steps": [
+    {
+      "name": "临时数据库、生产应用与回环模型启动",
+      "status": "passed",
+      "durationMs": 1248
+    },
+    {
+      "name": "思考菜单键盘、选中状态、Escape 与外部点击焦点",
+      "status": "passed",
+      "durationMs": 217
+    },
+    {
+      "name": "全部支持档位 × 独立搜索开关：刷新、请求快照、思考后工具与正文",
+      "status": "passed",
+      "durationMs": 6060
+    },
+    {
+      "name": "配置保存失败可见、重试保存并刷新保留",
+      "status": "passed",
+      "durationMs": 445
+    },
+    {
+      "name": "深度思考停止后结束状态并可再次发送",
+      "status": "passed",
+      "durationMs": 950
+    },
+    {
+      "name": "持续思考片段经过 JSONL 到达浏览器，再继续工具调用与正文",
+      "status": "passed",
+      "durationMs": 51185
+    },
+    {
+      "name": "供应商失败、思考耗尽预算及有界超时之后均可重新发送",
+      "status": "passed",
+      "durationMs": 68672
+    },
+    {
+      "name": "移动端及横屏弹层位于视口内、独立开关与焦点返回",
+      "status": "passed",
+      "durationMs": 234
+    },
+    {
+      "name": "明确的能力响应夹具：不支持项禁用并说明原因",
+      "status": "passed",
+      "durationMs": 329
+    },
+    {
+      "name": "无未捕获浏览器异常，所有供应商调用保持隔离",
+      "status": "passed",
+      "durationMs": 0
+    }
+  ],
+  "snapshots": [
+    {
+      "thinking": "off",
+      "webSearch": false,
+      "requestId": "adf2260f-0ac5-4aef-94d7-69a8695cc54d"
+    },
+    {
+      "thinking": "off",
+      "webSearch": true,
+      "requestId": "a78fcd1d-9ef6-475c-8d00-7e755dff94c3"
+    },
+    {
+      "thinking": "light",
+      "webSearch": false,
+      "requestId": "e25dec90-24e1-490e-b607-76a32649c106"
+    },
+    {
+      "thinking": "light",
+      "webSearch": true,
+      "requestId": "c7d35213-b10a-4294-aee3-4deac3b7c557"
+    },
+    {
+      "thinking": "standard",
+      "webSearch": false,
+      "requestId": "e054469e-c954-401d-82ef-99774c2267b8"
+    },
+    {
+      "thinking": "standard",
+      "webSearch": true,
+      "requestId": "d61d94e4-e214-4c68-a5f7-134b9d4c56d7"
+    },
+    {
+      "thinking": "deep",
+      "webSearch": false,
+      "requestId": "e5019656-95e1-4589-be85-50f620e32ca0"
+    },
+    {
+      "thinking": "deep",
+      "webSearch": true,
+      "requestId": "5b619a64-6651-4193-9a96-556240ce5d90"
+    }
+  ],
+  "pageErrors": [],
+  "blockedExternalResources": [],
+  "mock": {
+    "requests": [
+      {
+        "marker": "thinking-case-1",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-1",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-2",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-2",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-2",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-3",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-3",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-4",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-4",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-4",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-5",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-5",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-6",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-6",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-6",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-7",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-7",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-8",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-8",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-8",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-9",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-10",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-10",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-10",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-11",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-11",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-11",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-12",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-13",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-13",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-13",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-14",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-15",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-15",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-15",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-16",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-17",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-17",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-17",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      }
+    ],
+    "completed": 36,
+    "cancelled": 2,
+    "tools": [
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web"
+    ],
+    "rejected": []
+  },
+  "scope": "Production Nuxt UI/HTTP, temporary migrated SQLite, installed DeepSeek SDK + Mastra, local official-shaped SSE and intercepted Tavily responses. Unsupported-state display uses an explicitly replaced capability response. Chromium viewports do not emulate a real system keyboard. No real provider availability or answer-quality claim."
+}

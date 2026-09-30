@@ -2,6 +2,7 @@
 import type { PlanPreview } from '#shared/types'
 import { api, apiErrorMessage } from '~/utils/api'
 import { sourceLabel } from '~/utils/format'
+import { isDraftPreview, loadPreviewSnapshot } from '~/utils/preview-snapshot'
 
 const props = defineProps<{ preview: PlanPreview }>()
 
@@ -12,12 +13,15 @@ const showDiff = ref(false)
 const expanded = ref(true)
 const loadingDiff = ref(false)
 const failure = ref('')
+const openedDraft = ref<{ planId: number; draftId: number } | null>(null)
+const draftPreview = computed(() => isDraftPreview(props.preview))
 const samePlan = computed(() => ws.currentPlan.value?.id === props.preview.planId)
 const currentPlanVersion = computed(() => (samePlan.value ? ws.currentPlan.value?.version : undefined))
 const diff = computed(() => samePlan.value ? ws.versions.value.find((v) => v.version === props.preview.version)?.diffJson ?? [] : [])
 const diffLoaded = computed(() => ws.versions.value.some((v) => v.version === props.preview.version))
 
 async function toggleDiff() {
+  if (draftPreview.value) return
   showDiff.value = !showDiff.value
   if (!showDiff.value || !samePlan.value || diffLoaded.value) return
   loadingDiff.value = true
@@ -45,7 +49,7 @@ function show(value: unknown): string {
 
 async function copyJson() {
   try {
-    const { plan } = await api.plans.versionPlan(props.preview.planId, props.preview.version)
+    const plan = await loadPreviewSnapshot(props.preview, api.plans)
     await navigator.clipboard.writeText(JSON.stringify(plan, null, 2))
     copied.value = true
     setTimeout(() => (copied.value = false), 1500)
@@ -55,7 +59,7 @@ async function copyJson() {
 }
 
 async function undo() {
-  if (busy.value || !samePlan.value || props.preview.version === ws.currentPlan.value?.version) return
+  if (draftPreview.value || busy.value || !samePlan.value || props.preview.version === ws.currentPlan.value?.version) return
   if (!window.confirm(`切换到 v${props.preview.version}？当前版本将变为 v${props.preview.version}，历史版本仍保留。`)) return
   busy.value = true
   try {
@@ -69,12 +73,13 @@ async function undo() {
 <template>
   <div class="preview-card">
     <div class="preview-card__head">
-      <span class="preview-card__badge">v{{ preview.version }}</span>
+      <span class="preview-card__badge">{{ draftPreview ? preview.status === 'recoverable' ? '未完成草稿' : '生成草稿' : preview.status === 'recovered' ? `已恢复 · v${preview.version}` : `v${preview.version}` }}</span>
       <span class="preview-card__title">{{ preview.title || '未命名行程' }}</span>
       <span class="preview-card__source">{{ sourceLabel(preview.source) }}</span>
     </div>
 
     <p v-if="preview.summary" class="preview-card__summary">{{ preview.summary }}</p>
+    <p v-if="draftPreview" class="preview-card__note">{{ preview.status === 'recoverable' ? '本轮未完整完成，上一成功版本仍保留。可查看部分成果后确认恢复。' : '这是本轮生成中的部分成果，完整完成后才成为正式版本。' }}</p>
 
     <button
       v-if="preview.days.length"
@@ -104,7 +109,7 @@ async function undo() {
           </div>
         </div>
         <p v-if="preview.foodJournal?.length" class="preview-card__note">风物食记：{{ preview.foodJournal.map(item => item.name).join(' · ') }}</p>
-        <PlanMediaGallery v-if="expanded && samePlan && ws.currentPlan.value && preview.version === currentPlanVersion" :plan-id="preview.planId" :revision="ws.currentPlan.value.revision" :plan="ws.currentPlan.value.plan" compact />
+        <PlanMediaGallery v-if="!draftPreview && expanded && samePlan && ws.currentPlan.value && preview.version === currentPlanVersion" :plan-id="preview.planId" :revision="ws.currentPlan.value.revision" :plan="ws.currentPlan.value.plan" compact />
       </div>
     </div>
 
@@ -112,22 +117,20 @@ async function undo() {
 
     <div class="preview-card__actions">
       <button class="preview-card__action" @click="copyJson">{{ copied ? '已复制' : '复制 JSON' }}</button>
-      <button class="preview-card__action" @click="ws.openPlanView(preview.planId)">打开图文行程与地图</button>
-      <button class="preview-card__action" :disabled="loadingDiff || !samePlan || ws.offline.value" @click="toggleDiff">
+      <button v-if="draftPreview && preview.draftId" class="preview-card__action" :disabled="!samePlan || ws.offline.value" @click="openedDraft = { planId: preview.planId, draftId: preview.draftId }">查看完整草稿</button>
+      <button v-else class="preview-card__action" @click="ws.openPlanView(preview.planId)">打开图文行程与地图</button>
+      <button v-if="!draftPreview" class="preview-card__action" :disabled="loadingDiff || !samePlan || ws.offline.value" @click="toggleDiff">
         {{ loadingDiff ? '读取变更…' : diffLoaded ? `变更 ${diff.length} 处` : '查看变更' }}
       </button>
-      <button class="preview-card__action" :disabled="busy || !samePlan || preview.version === currentPlanVersion" @click="undo">
+      <button v-if="!draftPreview" class="preview-card__action" :disabled="busy || !samePlan || preview.version === currentPlanVersion" @click="undo">
         切换到此版本
-      </button>
-      <button class="preview-card__action preview-card__action--seal" :disabled="!samePlan || busy" @click="ws.savePlan()">
-        保存当前规划
       </button>
     </div>
 
     <p v-if="failure" class="feedback" role="alert">{{ failure }}</p>
 
     <!-- 变更明细折叠 -->
-    <div class="collapse-shell" :class="{ collapsed: !showDiff }">
+    <div v-if="!draftPreview" class="collapse-shell" :class="{ collapsed: !showDiff }">
       <div class="collapse-inner">
         <ul class="preview-card__diff">
           <li v-if="loadingDiff">正在读取历史变更…</li>
@@ -142,6 +145,7 @@ async function undo() {
       </div>
     </div>
   </div>
+  <DraftPreviewDialog v-if="openedDraft" :plan-id="openedDraft.planId" :draft-id="openedDraft.draftId" @close="openedDraft = null" />
 </template>
 
 <style lang="scss" scoped>
@@ -321,17 +325,6 @@ async function undo() {
     transform: scale(0.96);
   }
 
-  &--seal {
-    background: var(--cinnabar);
-    border-color: var(--cinnabar);
-    color: #ffffff;
-
-    &:hover:not(:disabled) {
-      background: var(--accent-red-hover);
-      border-color: var(--accent-red-hover);
-      color: #ffffff;
-    }
-  }
 
   &:disabled {
     opacity: 0.5;

@@ -7,10 +7,10 @@ import { db } from '../utils/db'
 import { getPlanSnapshot, parsePlanJson } from './plan'
 import { locateEntity } from './baidu'
 import { getResourceImageBytes } from './media-image'
-import { acquireTravelImage } from './travel-images'
+import { acquireTravelImage, IMAGE_RESOLVER_VERSION } from './travel-images'
 import { imageFailure } from '../providers/media-errors'
 
-const pending = (entity: PlanEntity): PlanResource => ({ entityId: entity.entityId, entityType: entity.entityType, name: entity.name, city: entity.city, status: 'pending', image: null, location: null, error: null })
+const pending = (entity: PlanEntity): PlanResource => ({ entityId: entity.entityId, entityType: entity.entityType, name: entity.name, city: entity.city, status: 'pending', image: null, location: null, error: null, imageResolverVersion: IMAGE_RESOLVER_VERSION })
 const imageUrl = (planId: number, entity: PlanEntity, imageKey: string | null | undefined) => `/api/plans/${planId}/resource-image?entityId=${encodeURIComponent(entity.entityId)}&v=${entity.fingerprint}${imageKey ? `&image=${encodeURIComponent(imageKey)}` : ''}`
 export async function getPlanResources(userId: string, planId: number): Promise<PlanResources> {
   const snapshot = await getPlanSnapshot(userId, planId)
@@ -19,9 +19,8 @@ export async function getPlanResources(userId: string, planId: number): Promise<
     const row = rows.find(value => value.entityId === entity.entityId && value.fingerprint === entity.fingerprint)
     const parsed = PlanResourceSchema.safeParse(row?.resourceJson)
     if (!parsed.success) return pending(entity)
-    // Previous releases could persist false negatives for decorated names. Re-evaluate once
-    // with the new resolver, without changing the user's plan or requiring a data migration.
-    if (!parsed.data.image && parsed.data.imageIssue === undefined) return { ...parsed.data, status: 'pending', error: null }
+    // Give newly added sources one attempt for older missing images, preserving confirmed photos.
+    if (!parsed.data.image && parsed.data.imageResolverVersion !== IMAGE_RESOLVER_VERSION) return { ...parsed.data, status: 'pending', error: null, imageIssue: null }
     if (parsed.data.image) parsed.data.image.url = imageUrl(planId, entity, row?.imageCacheKey)
     return parsed.data
   }) }

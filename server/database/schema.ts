@@ -5,6 +5,7 @@
  */
 import { blob, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core'
 import { user } from './auth-schema'
+import { chatRuns } from './operations'
 
 export * from './auth-schema'
 export * from './operations'
@@ -51,6 +52,9 @@ export const planVersions = sqliteTable(
     source: text('source').notNull().default('ai'),
     diffJson: text('diff_json', { mode: 'json' }),
     messageId: integer('message_id'),
+    name: text('name'),
+    nameSource: text('name_source', { enum: ['ai', 'user', 'fallback'] }),
+    nameRevision: integer('name_revision').notNull().default(0),
   },
   (t) => [
     uniqueIndex('plan_versions_plan_version_uq').on(t.planId, t.version),
@@ -120,6 +124,22 @@ export const messages = sqliteTable(
   },
   (t) => [index('messages_conversation_idx').on(t.conversationId, t.createdAt, t.id)],
 )
+
+/** Tool checkpoints are durable, but are not completed historical versions. */
+export const planRunDrafts = sqliteTable('plan_run_drafts', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  runId: integer('run_id').notNull().references(() => chatRuns.id, { onDelete: 'cascade' }),
+  planId: integer('plan_id').notNull().references(() => plans.id, { onDelete: 'cascade' }),
+  messageId: integer('message_id').notNull().references(() => messages.id, { onDelete: 'cascade' }),
+  baseVersionId: integer('base_version_id'),
+  baseRevision: integer('base_revision').notNull(),
+  revision: integer('revision').notNull(),
+  planJson: text('plan_json', { mode: 'json' }).notNull(),
+  status: text('status', { enum: ['active', 'recoverable', 'committed', 'discarded'] }).notNull().default('active'),
+  resultVersionId: integer('result_version_id'),
+  createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(now),
+}, t => [uniqueIndex('plan_run_drafts_run_uq').on(t.runId), index('plan_run_drafts_plan_idx').on(t.planId, t.id)])
 
 export const agentsMd = sqliteTable(
   'agents_md',

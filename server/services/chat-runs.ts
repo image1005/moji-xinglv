@@ -7,6 +7,8 @@ import { aiConfig } from '../utils/ai-config'
 import { db } from '../utils/db'
 import { stableStringify } from '../../shared/utils/json'
 import type { ModelConfiguration } from '../../shared/schemas/model-config'
+import { finalizePlanRun } from './plan'
+import { scheduleVersionName } from './version-names'
 
 export type RunStatus = typeof chatRuns.$inferSelect.status
 export const publicRun = (row: typeof chatRuns.$inferSelect) => ({
@@ -71,7 +73,14 @@ export async function waitForRun(id: number, signal: AbortSignal) {
 }
 
 export function attachRunMessage(id: number, assistantMessageId: number) {
-  db.update(chatRuns).set({ assistantMessageId, updatedAt: new Date() }).where(eq(chatRuns.id, id)).run()
+  db.transaction(tx => {
+    const run = tx.select().from(chatRuns).where(eq(chatRuns.id, id)).get()
+    if (!run || run.status !== 'running' || (run.assistantMessageId != null && run.assistantMessageId !== assistantMessageId)) throw createError({ statusCode: 409, statusMessage: '生成任务已结束或已绑定其他消息' })
+    const message = tx.select({ id: messages.id }).from(messages).innerJoin(conversations, eq(messages.conversationId, conversations.id))
+      .where(and(eq(messages.id, assistantMessageId), eq(messages.role, 'assistant'), eq(messages.conversationId, run.conversationId), eq(conversations.planId, run.planId), eq(conversations.userId, run.userId))).get()
+    if (!message) throw createError({ statusCode: 404, statusMessage: '助手消息不属于当前规划' })
+    tx.update(chatRuns).set({ assistantMessageId, updatedAt: new Date() }).where(eq(chatRuns.id, id)).run()
+  }, { behavior: 'immediate' })
 }
 
 export function checkpointRun(id: number, steps?: number) {
@@ -79,8 +88,25 @@ export function checkpointRun(id: number, steps?: number) {
 }
 
 export function finishRun(id: number, status: Exclude<RunStatus, 'running' | 'queued'>, errorCode?: string) {
-  db.update(chatRuns).set({ status, errorCode: errorCode ?? null, updatedAt: new Date(), finishedAt: new Date() })
-    .where(and(eq(chatRuns.id, id), inArray(chatRuns.status, [...active]))).run()
+  const result = db.transaction(tx => {
+    const row = tx.select().from(chatRuns).where(eq(chatRuns.id, id)).get()
+    if (!row) return undefined
+    if (row.status !== 'running' && row.status !== 'queued') return { row, status: row.status, versionId: null }
+    let versionId: number | null = null
+    if (status === 'completed') {
+      try { versionId = finalizePlanRun(tx, row, true) }
+      catch (error) {
+        if ((error as { statusCode?: number }).statusCode !== 409) throw error
+        status = 'failed'
+        errorCode = 'version_conflict'
+        finalizePlanRun(tx, row, false)
+      }
+    } else finalizePlanRun(tx, row, false)
+    tx.update(chatRuns).set({ status, errorCode: errorCode ?? null, updatedAt: new Date(), finishedAt: new Date() }).where(eq(chatRuns.id, id)).run()
+    return { row, status, versionId }
+  }, { behavior: 'immediate' })
+  if (result?.versionId) scheduleVersionName(result.row.userId, result.row.planId, result.versionId)
+  return result?.status
 }
 
 /** Called once on server startup. Version commits already persisted their preview in the same transaction. */
@@ -88,7 +114,8 @@ export function recoverInterruptedRuns() {
   return db.transaction(tx => {
     const unfinished = tx.select().from(chatRuns).where(inArray(chatRuns.status, [...active])).all()
     for (const row of unfinished) {
-      if (row.assistantMessageId) tx.update(messages).set({ content: sql`${messages.content} || '\n\n[生成因服务重启中断，已保存的行程与预览已恢复；请发送新消息继续。]'` })
+      finalizePlanRun(tx, row, false)
+      if (row.assistantMessageId) tx.update(messages).set({ content: sql`${messages.content} || '\n\n[生成因服务重启中断；上一成功版本保留，部分成果可通过恢复草稿查看并确认恢复。]'` })
         .where(and(eq(messages.id, row.assistantMessageId), eq(messages.conversationId, row.conversationId))).run()
       tx.update(chatRuns).set({ status: 'interrupted', errorCode: 'server_restart', updatedAt: new Date(), finishedAt: new Date() }).where(eq(chatRuns.id, row.id)).run()
     }

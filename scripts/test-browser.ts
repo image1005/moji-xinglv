@@ -101,10 +101,9 @@ async function openChat(title: string) {
   await expect(page!.locator('#travel-message')).toBeVisible()
 }
 
-async function register(email: string, password: string, name: string) {
+async function register(email: string, password: string) {
   await page!.goto(`${origin}/login`)
   await page!.getByRole('tab', { name: '注册', exact: true }).click()
-  await page!.getByPlaceholder('如何称呼你').fill(name)
   await page!.getByLabel('邮箱地址', { exact: true }).fill(email)
   await page!.getByLabel('密码', { exact: true }).fill(password)
   await page!.getByRole('button', { name: '注册，开启山海之旅', exact: true }).click()
@@ -184,7 +183,7 @@ try {
   let initialVersion = 0
 
   await step('注册与 UI 创建两份行笺', async () => {
-    await register(accountA.email, accountA.password, '浏览器测试甲')
+    await register(accountA.email, accountA.password)
     planA = await createPlan(titleA)
     const current = await details(planA)
     await api('POST', `/api/plans/${planA}/save`, { planJson: { ...current.plan, days: [{ date: '2026-10-01', city: '测试杭州', spots: [] }] }, expectedRevision: current.revision })
@@ -257,6 +256,12 @@ try {
       const result = await api<{ messages: { content: string }[] }>('GET', `/api/conversations/${conversationId}`)
       return result.messages.some((message) => message.content.includes(mock.marker))
     }, { timeout: 25000 }).toBe(true)
+    // A checkpoint may persist the last text delta before the upstream stop frame.
+    await expect.poll(async () => {
+      const runs = await api<{ status: string }[]>('GET', `/api/chat/runs?conversationId=${conversationId}`)
+      return runs[0]?.status
+    }, { timeout: 15000 }).toBe('completed')
+    await expect.poll(() => mock.state.completed).toBe(1)
     assert.equal(mock.state.requests, 1)
     assert.equal(mock.state.completed, 1)
     assert.equal(mock.state.cancelled, 0)
@@ -272,13 +277,14 @@ try {
     const before = await details(planA)
     const versions = await api<{ version: number }[]>('GET', `/api/plans/${planA}/versions`)
     await page!.getByRole('tab', { name: '版本路线', exact: true }).click()
-    await page!.getByRole('button', { name: `版本 v${initialVersion}`, exact: true }).click()
+    await page!.locator(`.roadmap__node[data-version="${initialVersion}"]`).click()
     await page!.getByRole('button', { name: '切换到此版本', exact: true }).click()
     await expect.poll(async () => (await details(planA)).version).toBe(initialVersion)
     const after = await details(planA)
     assert.equal(after.revision, before.revision + 1)
     assert.equal((await api<unknown[]>('GET', `/api/plans/${planA}/versions`)).length, versions.length)
     assert.equal(after.plan.foodJournal.length, 0)
+    await page!.getByRole('button', { name: '关闭版本预览', exact: true }).click()
   })
 
   await step('移动端抽屉 Escape 焦点、页签键盘与缩小可视区域', async () => {
@@ -319,7 +325,7 @@ try {
     assert.equal((await signedOut).status(), 200)
     await expect(page!).toHaveURL(`${origin}/login`)
     await expect(page!.getByRole('button', { name: '登录，启程', exact: true })).toBeVisible()
-    await register(accountB.email, accountB.password, '浏览器测试乙')
+    await register(accountB.email, accountB.password)
     await expect(page!.locator('.folder')).toHaveCount(0)
     const newId = await createPlan(`账号乙行笺 ${suffix}`)
     await openPlan(`账号乙行笺 ${suffix}`, '风物食记')

@@ -1,5 +1,7 @@
 # 2026-09-21 图片覆盖修复与腾讯云文搜图
 
+2026-09-30 已增加 Wikidata 与 Openverse 并默认关闭付费补充；当前使用方法见 [免费图片说明](FREE_IMAGE_PROVIDERS.md)。本文以下保留此前腾讯接入的历史记录。
+
 起点为 `codex/travel-delivery/0f52c4c`，目录 `E:\hbws\moji-xinglv-new\moji-xinglv-main`，初始工作区干净。已重新检查 AGENTS、PRD、package、Bun锁和实际实现。真实库只读排查；全部验证写入临时库，不修改 .env 或既有行程/版本，无新迁移。
 
 ## 缺图原因与处理

@@ -1,0 +1,550 @@
+[
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "off"
+    },
+    "passed": true,
+    "durationMs": 2527,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 84,
+    "reasoningChars": 0,
+    "upstreamReasoningChars": 0,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "disabled"
+        },
+        "maxTokens": 4096,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 39
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "disabled"
+        },
+        "maxTokens": 4096,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 50
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 2,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "off"
+    },
+    "passed": true,
+    "durationMs": 1942,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 78,
+    "reasoningChars": 0,
+    "upstreamReasoningChars": 0,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "disabled"
+        },
+        "maxTokens": 4096,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 39
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "disabled"
+        },
+        "maxTokens": 4096,
+        "assistantReasoningLengths": [
+          0,
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 46
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "light"
+    },
+    "passed": true,
+    "durationMs": 2471,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 108,
+    "reasoningChars": 21,
+    "upstreamReasoningChars": 21,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "low",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 46,
+        "reasoningTokens": 6
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "low",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          21
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 53,
+        "reasoningTokens": 0
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 2,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "light"
+    },
+    "passed": true,
+    "durationMs": 1942,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 73,
+    "reasoningChars": 65,
+    "upstreamReasoningChars": 65,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "low",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 56,
+        "reasoningTokens": 16
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "low",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0,
+          65
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 44,
+        "reasoningTokens": 0
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "standard"
+    },
+    "passed": true,
+    "durationMs": 2509,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 207,
+    "reasoningChars": 21,
+    "upstreamReasoningChars": 21,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "high",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 46,
+        "reasoningTokens": 6
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "high",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          21
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 101,
+        "reasoningTokens": 0
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 2,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "standard"
+    },
+    "passed": true,
+    "durationMs": 2344,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 205,
+    "reasoningChars": 126,
+    "upstreamReasoningChars": 126,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "high",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 66,
+        "reasoningTokens": 26
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "high",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0,
+          112
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 101,
+        "reasoningTokens": 4
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 1,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "deep"
+    },
+    "passed": true,
+    "durationMs": 2256,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 73,
+    "reasoningChars": 316,
+    "upstreamReasoningChars": 316,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": []
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 84,
+        "reasoningTokens": 44
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          198
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 74,
+        "reasoningTokens": 27
+      }
+    ]
+  },
+  {
+    "mode": "real-provider",
+    "scenario": "read-tool",
+    "turn": 2,
+    "configuration": {
+      "model": "deepseek-flash",
+      "webSearch": false,
+      "thinking": "deep"
+    },
+    "passed": true,
+    "durationMs": 2483,
+    "terminal": "completed",
+    "persistedStatus": "completed",
+    "persistedError": null,
+    "textChars": 50,
+    "reasoningChars": 261,
+    "upstreamReasoningChars": 261,
+    "tools": [
+      "get_plan"
+    ],
+    "sources": 0,
+    "errors": 0,
+    "paramsCorrect": true,
+    "planStats": {
+      "days": 0,
+      "spots": 0,
+      "foods": 0,
+      "checklist": 0
+    },
+    "wire": [
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "tool_calls"
+        ],
+        "outputTokens": 66,
+        "reasoningTokens": 26
+      },
+      {
+        "model": "deepseek-flash",
+        "thinking": {
+          "type": "enabled"
+        },
+        "effort": "max",
+        "maxTokens": 32768,
+        "assistantReasoningLengths": [
+          0,
+          127
+        ]
+      },
+      {
+        "httpStatus": 200,
+        "finishReasons": [
+          "stop"
+        ],
+        "outputTokens": 59,
+        "reasoningTokens": 29
+      }
+    ]
+  }
+]

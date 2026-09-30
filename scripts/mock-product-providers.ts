@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import { isVersionNameRequest, versionNameFixtureResponse, type VerificationModelRequest } from './model-verification'
 
 /** Explicit fixture content. Never used by production code or as proof of real provider quality. */
 export function createProductProviderFetch(originalFetch: typeof fetch): typeof fetch {
@@ -8,7 +9,16 @@ export function createProductProviderFetch(originalFetch: typeof fetch): typeof 
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     if (/^data:image\/(?:png|jpeg|webp);base64,/.test(url.href)) return originalFetch(input, init)
     if (['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) return originalFetch(input, init)
+    if ((init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase() === 'POST' && url.pathname.endsWith('/chat/completions')) {
+      try {
+        const body = (typeof init?.body === 'string' ? JSON.parse(init.body) : input instanceof Request ? await input.clone().json() : null) as VerificationModelRequest | null
+        if (body && isVersionNameRequest(body)) return versionNameFixtureResponse(body)
+      } catch { /* Unrecognized requests retain the external-network rejection below. */ }
+    }
     if (url.hostname === 'api.tavily.com' && url.pathname === '/search') return json({ results: [{ title: '[本地测试] 旅行资料', url: 'https://example.org/fixture-travel', content: '这是隔离测试来源，用于验证搜索引用协议，不代表真实营业或门票信息。' }] })
+    // Preserve the existing Wikimedia fixture while exercising fallback past the new free sources.
+    if (url.hostname === 'www.wikidata.org' && url.pathname === '/w/api.php') return json({ search: [], entities: {} })
+    if (url.hostname === 'api.openverse.org' && url.pathname === '/v1/images/') return json({ result_count: 0, results: [] })
     if (url.hostname === 'zh.wikipedia.org') {
       const title = url.searchParams.get('titles') || '西湖'
       return json({ query: { pages: { '1': { title, extract: `${title}位于杭州。这是本地景点和美食媒体集成测试资料。`, pageimage: 'Shanhai-fixture.png', pageprops: {} } } } })

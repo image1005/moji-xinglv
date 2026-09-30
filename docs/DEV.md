@@ -19,13 +19,13 @@ Nitro（Bun 运行时）
 关键数据流：
 
 1. **AI 编辑**：`apply_plan_edits(edits[])`（原子操作：plan/day/spot/food/checklist × add/update/remove/move/status/toggle）→
-   服务端在同一事务内按序应用、`PlanSchema` 校验、写入版本与更新 `plans.plan_json`；`patch_plan_json` 仅作兜底。
-   **一轮对话只保留一个版本**：同一 `assistantMessageId` 且仍是当前版本时原地更新（diff 对父版本重算），指针被移动或换轮后追加新版本。
-   工具执行侧维护读取时 revision，事务提交后推进；409 必须重读。预览与版本引用在规划提交事务内写入助手消息。AI 不提供全量覆盖工具。
+   服务端在同一事务内按序应用、`PlanSchema` 校验并写入运行草稿；正常收尾时才创建正式版本与更新 `plans.plan_json`；`patch_plan_json` 仅作兜底。
+   **一轮对话只提交一个正式版本**：同一 `assistantMessageId` 的多次编辑更新持久化运行草稿，正常终态才提交最终快照；失败、取消或重启保留可恢复草稿及上一成功版本。运行中有其他编辑或版本切换时，禁止用过期草稿覆盖新结果，必须由用户比较后明确恢复。
+   工具执行侧维护读取时 revision，事务提交后推进；409 必须重新检查作用域和基线，不能以重读绕过草稿冲突。草稿预览及最终版本引用与各自提交事务一起写入助手消息。AI 不提供全量覆盖工具。
 2. **切换版本（Undo）**：校验当前 `expectedVersion`、`expectedRevision` 与会话归属 → 读取目标版本 → 设置当前规划快照与 `current_version_id`，递增 revision（**不新建版本**）→ 同事务插入系统消息与预览。
    历史永不删除；过期写入返回 409。切换后继续编辑会以 `max(version)+1` 追加版本、以当前版本为父，版本路线图据此分叉。
 3. **百度请求**：相同参数单飞去重 → `hashKey(api, params)` → Nitro storage → SQLite `cache` 表 → 未命中才带 AK 请求百度 → 回写。二进制 L1 使用可序列化 base64 与绝对过期时间，L2 命中回填剩余 TTL；前端再包一层按用户隔离的 IndexedDB。历史 `panoramas` 表保留兼容，但新图片统一使用 `cache`。
-   允许 `staticimage/v2`、`panorama/v2` 及资源补齐使用的 `place/v2/search`、`geocoding/v3`；按城市、名称、地址消歧。原 search_poi 仍只查规划。没有道路导航或浏览器地图 SDK。
+   允许 `staticimage/v2`、`panorama/v2` 及资源补齐使用的 `place/v2/search`、`geocoding/v3`；按城市、名称、地址消歧。原 search_poi 仍只查规划。城市舆图另用百度 JSAPI 4.0 与独立浏览器端 AK，支持拖动、缩放和地点联动；不提供道路导航。
 4. **生成与恢复**：先以 `(userId, requestId)` 在 `chat_runs` 去重、分配并发/队列名额，再追加用户/助手消息。工具结果和周期检查点落库，终态幂等收尾；重启将活动任务标记 interrupted。恢复只读取已有结果，明确新一轮才换 requestId。输入处理器每次模型调用都计算规则、工具、历史和工具结果的字节预算。
 
 ## 目录与关键文件
@@ -76,9 +76,9 @@ Nitro（Bun 运行时）
 - **AI 只产 patch**：工具入参、输出、最终 JSON 全链路 Zod 校验；禁止用模型文本整体覆盖 `plan_json`，不向 AI 暴露全量覆盖工具。原子编辑优先 `apply_plan_edits`，`patch_plan_json` 仅兜底；工具无需先读，409 冲突时由模型重读重试。
 - **严格契约**：Day / Spot / Budget / 食记 / 清单 / 行程对象均为 `z.strictObject`；未知字段返回 400 与改名提示（`formatPlanIssues`），不静默丢弃。手工编辑全部走可视化表单（行程总览「编辑资料」、路线舆图、风物食记、出行清单）。
 - **数据扩展**：`foodJournal` / `checklist` 缺省 `[]`，条目 ID 各自唯一。`Spot.lng` / `lat` 缺省且未知时同时为 `null`；`address=''`、`category='sight'`、`durationMinutes=60`、`cost=0`。所有入口经同一 schema 归一化，旧 JSON 无需破坏性迁移。
-- **乐观锁**：保存、资料修改和切换应携带读取时的 `expectedVersion` / `expectedRevision`；同一事务校验并写入。revision 随有效修改前进，包括同轮 AI 原地更新、Markdown 资料变更及版本切换，不能由版本号代替。无变化保存也先检查已传值。409 保留草稿，比较后明确重新应用；旅行偏好独立发送 expectedVersion，不存在时为 0。
+- **乐观锁**：保存、资料修改和切换应携带读取时的 `expectedVersion` / `expectedRevision`；同一事务校验并写入。revision 随有效修改前进，包括 AI 草稿检查点、正式提交、Markdown 资料变更及版本切换，不能由版本号代替。无变化保存也先检查已传值。409 保留草稿，比较后明确重新应用；旅行偏好独立发送 expectedVersion，不存在时为 0。版本改名独立使用 `expectedNameRevision`，不推进规划 revision。
 - **版本指针**：当前版本 = `plans.current_version_id`（为兼容历史数据，指针为空时回退到最新版本）。切换版本只改指针与规划快照；新版本编号取 `max(version)+1`，因此切换后继续编辑可能跳号并在路线图中分叉。
-- **地图边界**：只允许静态图与 panorama 服务端代理。POI 仅检索当前规划；未知坐标不生成地图请求、不由 AI 猜测。路线只是景点顺序连线，不是导航；无 key 提示降级，不阻断行程编辑。
+- **地图边界**：城市舆图使用百度 JSAPI 4.0；公开的 `NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK` 必须独立配置并限制 Referer，严禁复用服务端 AK。静态图、panorama、受控地点查询与地理编码继续走服务端代理。POI 仅检索当前规划；未知坐标不绘制标记、不由 AI 猜测。路线只是景点顺序连线，不是导航；浏览器 AK 缺失或 SDK 加载失败时保留静态预览与完整地点清单，不阻断行程编辑。
 - **密钥边界**：`BAIDU_MAP_AK` 只允许在 `server/services/baidu.ts` 读取；
   前端产物不得出现 AK / AUTH_SECRET / AI_API_KEY 的**值**。
 - **页面缓存（KeepAlive）**：`/` 与 `/admin` 通过 `definePageMeta({ keepalive: true })` 保留页面本地状态
@@ -101,7 +101,9 @@ Nitro（Bun 运行时）
 - `bun run test:integration`（`scripts/verify-isolated.ts`）：构建后生成临时 SQLite 与随机凭据，启动回环生产服务并执行 HTTP 验收；最后只停止自身服务及清理自身临时目录，不读写 `data/app.db`。脚本只调整自身代理环境，避免回环请求经过本机代理。
 - `bun run test:browser`：构建后以 Playwright Chromium、临时数据库和回环模拟 AI 检查草稿恢复/409、同规划生成连续性、版本、移动端与身份隔离。报告与截图写入 `.verification/browser/<时间>/`，失败仍保留诊断。首次安装用 `bunx playwright install chromium`；CI 用 `--with-deps`。不得把模拟模型通过作为真实供应商验收。
 - `bun run test:recovery`：构建后在私有临时数据库中让真实 AI 工具完成提交，再强制终止脚本自身启动的服务并同库重启，验证预览恢复、任务中断、重复请求不重放及新请求可继续。仅使用本地 SSE 模拟模型，报告在 `.verification/recovery/<时间>/`。
-- `bun run check:release`：按顺序运行 check、build、test:integration、test:recovery、test:browser；需要预先安装 Chromium，不启用真实供应商评测。
+- `bun run test:thinking:browser`：临时数据库与隔离供应商检查思考/搜索八种组合、重复思考的多步工具续传、停止/失败/超时恢复和按钮可访问性；`THINKING_BROWSER_LONG=1` 使用 50 秒持续思考及 65 秒测试期限，实际验证超过客户端 45 秒空闲窗口仍可继续。报告与截图位于 `.verification/thinking/<时间>/`。
+- `bun run verify:thinking --real`：明确启用真实模型验收；可加 `--search`、`--followup`，或 `--thinking=deep --planning` 验证七天行程。只写临时数据库，输出参数、计数与终态，不输出密钥或思考正文。
+- `bun run check:release`：按顺序运行 check、verify:media、build、test:integration、test:recovery、test:browser、test:thinking:browser、test:product；需要预先安装 Chromium，不启用真实供应商评测。
 - `bun run eval:ai`：固定样例验证结构化编辑契约，默认无外部调用。真实评测必须同时设置 `EVAL_LIVE=true` 并传 `--live`，受 `EVAL_MAX_CASES` 限制，使用临时数据库；未运行时不报告模型准确率或 token 节约幅度。
 - 聊天回归覆盖不可信历史过滤、活动规划锁、失败/取消单次收尾及工具输出版本关联；影像代理回归覆盖响应脱敏、文件签名、体积上限及并发去重。它们是隔离测试，不替代真实模型/百度联调。
 - 验收结论以本次实际命令的退出码与输出报告为准；未运行 smoke、浏览器、AI 或百度实测时须明确说明，不能由 lint / 单测推断已经验收。

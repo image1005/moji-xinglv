@@ -5,6 +5,9 @@ import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join, relative, resolve, sep } from 'node:path'
 import type { PlanPreview } from '../shared/types'
+import type { Plan } from '../shared/schemas/plan'
+import type { PlanDetail, SaveResult, VersionItem } from '../shared/schemas/workspace'
+import { isVersionNameRequest, versionNameFixtureResponse, type VerificationModelRequest } from './model-verification'
 
 assert(existsSync('.output/server/index.mjs'), '请先运行 bun run build')
 for (const key of ['HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'http_proxy', 'https_proxy', 'all_proxy']) process.env[key] = ''
@@ -16,7 +19,7 @@ const reportDirectory = resolve('.verification/recovery', new Date().toISOString
 mkdirSync(reportDirectory, { recursive: true })
 const marker = `recovery-${crypto.randomUUID()}`
 const steps: { name: string; durationMs: number }[] = []
-const state = { planId: 0, requests: 0, toolIssued: false, holding: false, mode: 'edit' as 'edit' | 'complete' }
+const state = { planId: 0, requests: 0, namingRequests: 0, toolIssued: false, holding: false, mode: 'edit' as 'edit' | 'complete' }
 let service: ReturnType<typeof Bun.spawn> | undefined
 let mock: ReturnType<typeof Bun.serve> | undefined
 let serviceOutput: Promise<string> | undefined
@@ -50,7 +53,11 @@ try {
     async fetch(request) {
       assert.equal(new URL(request.url).pathname, '/v1/chat/completions', '模拟模型不接受其他上游接口')
       assert.equal(request.method, 'POST')
-      await request.json()
+      const body = await request.json() as VerificationModelRequest
+      if (isVersionNameRequest(body)) {
+        state.namingRequests++
+        return versionNameFixtureResponse(body)
+      }
       state.requests++
       const encoder = new TextEncoder()
       const id = `chatcmpl-${crypto.randomUUID()}`
@@ -64,7 +71,7 @@ try {
           send(chunk({ role: 'assistant', content: '' }))
           if (state.mode === 'edit' && state.toolIssued) {
             state.holding = true
-            send(chunk({ content: '工具已保存修改，继续生成中。' }))
+            send(chunk({ content: '部分修改已保存为生成草稿，继续生成中。' }))
             // Deliberately leave the stream open. Only killing our server interrupts this run.
             return
           }
@@ -100,7 +107,7 @@ try {
   const env = {
     ...process.env, NODE_ENV: 'production', DATABASE_URL: `file:${join(directory, 'recovery.sqlite').replaceAll('\\', '/')}`,
     AUTH_SECRET: crypto.randomUUID() + crypto.randomUUID(), BETTER_AUTH_URL: origin,
-    AI_API_KEY: 'recovery-test-dummy', AI_BASE_URL: `http://127.0.0.1:${mock.port}/v1`, AI_MODEL: 'recovery-mock', BAIDU_MAP_AK: '',
+    AI_PROVIDER: 'compatible', AI_API_KEY: 'recovery-test-dummy', AI_BASE_URL: `http://127.0.0.1:${mock.port}/v1`, AI_MODEL: 'recovery-mock', BAIDU_MAP_AK: '',
     AI_GLOBAL_CONCURRENCY: '1', AI_USER_CONCURRENCY: '1', AI_REQUESTS_PER_PERIOD: '20', AI_GLOBAL_REQUESTS_PER_PERIOD: '20',
     NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), HOST: '127.0.0.1', PORT: String(port),
   }
@@ -135,13 +142,27 @@ try {
     }
     throw new Error('恢复测试服务未在时限内就绪')
   }
-  type PlanState = { version: number; revision: number; plan: { summary: string } }
+  type PlanState = PlanDetail
+  type Draft = { id: number; runId: number; messageId: number; status: string; revision: number; baseVersionId: number; resultVersionId: number | null; plan?: Plan }
   type Message = { id: number; role: string; content: string; preview: PlanPreview | null; planVersion: number | null }
   type Run = { requestId: string; status: string; assistantMessageId: number | null; errorCode: string | null }
   let conversationId = 0
+  let baseline: PlanState
+  let activeDraft: Draft
   let beforePlan: PlanState | undefined
   let beforeMessages: Message[] = []
-  let beforeVersions: { id: number; version: number }[] = []
+  let beforeVersions: VersionItem[] = []
+  const versions = () => json<VersionItem[]>(`/api/plans/${state.planId}/versions`)
+  const historicalPlan = (version: number) => json<{ plan: Plan }>(`/api/plans/${state.planId}/versions/${version}`)
+  const drafts = async () => (await json<{ drafts: Draft[] }>(`/api/plans/${state.planId}/drafts`)).drafts
+  const draftDetail = async (id: number) => (await json<{ draft: Draft }>(`/api/plans/${state.planId}/drafts/${id}`)).draft
+  async function awaitNames() {
+    for (let index = 0; index < 100; index++) {
+      if ((await versions()).every(version => version.nameSource === 'ai')) return
+      await Bun.sleep(50)
+    }
+    assert.fail('模拟供应商命名未通过真实命名服务持久化')
+  }
   const requestId = crypto.randomUUID()
   const chatBody = () => ({ protocolVersion: 1, type: 'message', messageId: 'recovery-user', planId: state.planId, conversationId, requestId, message: { id: 'recovery-user', role: 'user', parts: [{ type: 'text', text: '只修改行程简介，然后继续说明。' }] } })
 
@@ -155,9 +176,13 @@ try {
     state.planId = plan.planId
     const conversation = await json<{ id: number }>('/api/conversations', post({ planId: state.planId, title: marker }))
     conversationId = conversation.id
+    baseline = await json<PlanState>(`/api/plans/${state.planId}`)
+    await awaitNames()
+    assert.equal(state.requests, 0, '自动命名不能计入旅行生成请求')
+    assert.equal(state.namingRequests, 1)
   })
 
-  await step('真实工具提交成功且第二步仍在生成', async () => {
+  await step('活动草稿已持久化，第二步生成时上一成功版本保持不变', async () => {
     const response = await request('/api/chat', { ...chatPost(chatBody()), signal: AbortSignal.any([requestAbort.signal, AbortSignal.timeout(30000)]) })
     assert.equal(response.status, 200)
     assert.match(response.headers.get('content-type') ?? '', /application\/x-ndjson/)
@@ -168,19 +193,28 @@ try {
       const detail = await json<{ messages: Message[] }>(`/api/conversations/${conversationId}`)
       const tasks = await json<Run[]>(`/api/chat/runs?conversationId=${conversationId}`)
       const assistant = detail.messages.find(message => message.role === 'assistant')
-      if (state.holding && current.plan.summary === marker && tasks[0]?.status === 'running' && assistant?.preview?.summary === marker) {
+      const currentDrafts = await drafts()
+      if (state.holding && tasks[0]?.status === 'running' && assistant?.preview?.summary === marker && currentDrafts[0]?.status === 'active') {
         beforePlan = current
         beforeMessages = detail.messages
-        beforeVersions = await json(`/api/plans/${state.planId}/versions`)
+        beforeVersions = await versions()
+        activeDraft = await draftDetail(currentDrafts[0].id)
+        assert.equal(activeDraft.plan?.summary, marker)
+        assert.equal(assistant.preview.status, 'draft')
+        assert.equal(assistant.preview.draftId, activeDraft.id)
+        assert.equal(assistant.planVersion, null)
         committed = true
         break
       }
       await Bun.sleep(100)
     }
-    assert(committed, '未观察到工具事务已提交且任务仍在运行的边界')
-    assert.equal(beforePlan!.version, 2)
+    assert(committed, '未观察到活动草稿已持久化且任务仍在运行的边界')
+    assert.equal(beforePlan!.version, baseline.version)
+    assert.deepEqual(beforePlan!.plan, baseline.plan)
+    assert(beforePlan!.revision > baseline.revision)
     assert.equal(beforeMessages.length, 2)
-    assert.equal(beforeVersions.length, 2)
+    assert.equal(beforeVersions.length, 1)
+    assert.deepEqual((await historicalPlan(1)).plan, baseline.plan)
     assert.equal(state.requests, 2)
   })
 
@@ -193,15 +227,22 @@ try {
     await startService()
   })
 
-  await step('恢复已提交预览、标记中断并拒绝重复请求', async () => {
+  await step('重启将活动草稿标为可恢复，保留成功快照并拒绝重复请求', async () => {
     const current = await json<PlanState>(`/api/plans/${state.planId}`)
     assert.deepEqual(current, beforePlan)
     const detail = await json<{ messages: Message[] }>(`/api/conversations/${conversationId}`)
     assert.equal(detail.messages.length, beforeMessages.length)
     const assistant = detail.messages.find(message => message.role === 'assistant')!
     const oldAssistant = beforeMessages.find(message => message.role === 'assistant')!
-    assert.deepEqual(assistant.preview, oldAssistant.preview)
-    assert.equal(assistant.planVersion, oldAssistant.planVersion)
+    assert.equal(assistant.preview?.status, 'recoverable')
+    assert.equal(assistant.preview?.draftId, activeDraft.id)
+    assert.equal(assistant.preview?.summary, oldAssistant.preview?.summary)
+    assert.equal(assistant.planVersion, null)
+    const recoveredDraft = await draftDetail(activeDraft.id)
+    assert.equal(recoveredDraft.status, 'recoverable')
+    assert.deepEqual(recoveredDraft.plan, activeDraft.plan)
+    assert.equal((await drafts()).length, 1)
+    assert.deepEqual((await historicalPlan(1)).plan, baseline.plan)
     assert.match(assistant.content, /服务重启中断/)
     const tasks = await json<Run[]>(`/api/chat/runs?conversationId=${conversationId}`)
     assert.equal(tasks[0]!.requestId, requestId)
@@ -211,7 +252,7 @@ try {
     assert.equal(repeated.status, 409)
     await repeated.text()
     assert.equal(state.requests, 2, '重试不应触发模型或重复编辑')
-    assert.deepEqual(await json(`/api/plans/${state.planId}/versions`), beforeVersions)
+    assert.deepEqual(await versions(), beforeVersions)
     assert.equal((await json<{ messages: Message[] }>(`/api/conversations/${conversationId}`)).messages.length, beforeMessages.length)
   })
 
@@ -227,8 +268,44 @@ try {
     assert.equal(tasks.find(task => task.requestId === freshId)?.status, 'completed')
     assert.equal(tasks.find(task => task.requestId === requestId)?.status, 'interrupted')
     assert.equal(state.requests, 3)
-    assert.deepEqual(await json(`/api/plans/${state.planId}/versions`), beforeVersions)
+    assert.deepEqual(await versions(), beforeVersions)
     assert.equal((await json<{ messages: Message[] }>(`/api/conversations/${conversationId}`)).messages.length, 4)
+  })
+  await step('显式恢复受 revision 保护，只追加正式版并保留旧好版本', async () => {
+    const path = `/api/plans/${state.planId}/drafts/${activeDraft.id}/restore`
+    const stale = await request(path, post({ expectedVersion: baseline.version, expectedRevision: baseline.revision, conversationId }))
+    assert.equal(stale.status, 409)
+    await stale.text()
+    assert.deepEqual(await json<PlanState>(`/api/plans/${state.planId}`), beforePlan)
+    const result = await json<SaveResult>(path, post({ expectedVersion: beforePlan!.version, expectedRevision: beforePlan!.revision, conversationId }))
+    assert.equal(result.skipped, false)
+    assert.equal(result.version, 2)
+    const current = await json<PlanState>(`/api/plans/${state.planId}`)
+    assert.equal(current.plan.summary, marker)
+    assert.equal(current.version, 2)
+    assert.equal((await versions()).length, 2)
+    assert.deepEqual((await historicalPlan(1)).plan, baseline.plan)
+    assert.deepEqual((await historicalPlan(2)).plan, activeDraft.plan)
+    assert.equal((await versions()).find(version => version.version === 2)?.parentVersionId, beforeVersions[0]!.id)
+    assert.equal((await drafts()).length, 0)
+    const assistant = (await json<{ messages: Message[] }>(`/api/conversations/${conversationId}`)).messages.find(message => message.id === activeDraft.messageId)!
+    assert.equal(assistant.preview?.status, 'recovered')
+    assert.equal(assistant.planVersion, result.versionId)
+    const task = (await json<Run[]>(`/api/chat/runs?conversationId=${conversationId}`)).find(run => run.requestId === requestId)
+    assert.equal(task?.status, 'interrupted', '恢复不得伪造原运行的终态')
+
+    const manual = await json<SaveResult>(`/api/plans/${state.planId}/save`, post({ planJson: { ...current.plan, summary: '用户恢复后另存的有效修改' }, expectedVersion: current.version, expectedRevision: current.revision }))
+    const later = await json<PlanState>(`/api/plans/${state.planId}`)
+    const repeated = await json<SaveResult>(path, post({ expectedVersion: beforePlan!.version, expectedRevision: beforePlan!.revision, conversationId }))
+    assert.equal(repeated.skipped, true)
+    assert.equal(repeated.version, result.version)
+    assert.equal(manual.version, 3)
+    assert.deepEqual(await json<PlanState>(`/api/plans/${state.planId}`), later, '重复恢复不能覆盖后续编辑或移动当前指针')
+    assert.equal((await versions()).length, 3)
+    assert.deepEqual((await historicalPlan(1)).plan, baseline.plan)
+    await awaitNames()
+    assert.equal(state.requests, 3)
+    assert.equal(state.namingRequests, 3, '初始版、恢复版与手工版分别通过真实服务命名一次')
   })
   passed = true
 } catch (error) {
@@ -238,7 +315,7 @@ try {
   requestAbort.abort()
   await stopService()
   mock?.stop(true)
-  writeFileSync(join(reportDirectory, 'report.json'), JSON.stringify({ passed, steps, modelRequests: state.requests, scope: '生产构建、真实强制进程退出与同库重启、临时SQLite、本地SSE；未访问真实AI或用户数据库。' }, null, 2))
+  writeFileSync(join(reportDirectory, 'report.json'), JSON.stringify({ passed, steps, modelRequests: state.requests, namingRequests: state.namingRequests, scope: '生产构建、真实强制进程退出与同库重启、活动草稿持久化、明确恢复及重试保护、真实命名API、临时SQLite、本地模型；未访问真实AI或用户数据库。' }, null, 2))
   writeFileSync(join(reportDirectory, 'server.log'), logs.join('\n'))
   writeFileSync(join(reportDirectory, 'server-errors.log'), errors.join('\n'))
   const checked = realpathSync(directory)

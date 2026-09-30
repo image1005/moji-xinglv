@@ -64,6 +64,13 @@ it('未配置和关闭时不发出请求；显式选择腾讯云但缺密钥会�
   expect(await api.searchTencentImages('测试')).toEqual([])
   expect(request).not.toHaveBeenCalled()
 })
+it('默认只启用免费来源，即使存在腾讯凭据也不会自动计费', async () => {
+  vi.stubEnv('MEDIA_IMAGE_SEARCH', undefined)
+  const request = vi.spyOn(wimgs.v20251106.Client.prototype, 'request')
+  expect(api.tencentImageSearchEnabled()).toBe(false)
+  expect(await api.searchTencentImages('太原 晋祠')).toEqual([])
+  expect(request).not.toHaveBeenCalled()
+})
 it('真实 SDK 在隔离 HTTP 服务完成签名、序列化及腾讯错误响应解析', async () => {
   const received: Array<{ action: string | string[] | undefined; version: string | string[] | undefined; signed: boolean; body: string }> = []
   let failure = false

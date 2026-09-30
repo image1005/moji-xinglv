@@ -12,14 +12,14 @@ const ResponseSchema = z.object({ Images: z.array(z.string().max(20000)).max(20)
 type SearchImage = z.infer<typeof ImageSchema>
 
 export function tencentImageSearchEnabled() {
-  const mode = process.env.MEDIA_IMAGE_SEARCH || 'auto'
+  const mode = process.env.MEDIA_IMAGE_SEARCH || 'off'
   return mode === 'tencent' || mode === 'auto' && Boolean(process.env.TENCENTCLOUD_SECRET_ID?.trim() && process.env.TENCENTCLOUD_SECRET_KEY?.trim())
 }
 const inflight = new Map<string, Promise<SearchImage[]>>()
 let window = 0, requests = 0
 
 /** Successful search results last one day; empty results only ten minutes to bound retry costs. */
-export async function searchTencentImages(query: string): Promise<SearchImage[]> {
+export async function searchTencentImages(query: string, parentSignal?: AbortSignal): Promise<SearchImage[]> {
   if (!tencentImageSearchEnabled()) return []
   if (!process.env.TENCENTCLOUD_SECRET_ID?.trim() || !process.env.TENCENTCLOUD_SECRET_KEY?.trim()) {
     throw createError({ statusCode: 503, data: { mediaConfiguration: true }, message: 'Tencent image search is not configured' })
@@ -38,7 +38,7 @@ export async function searchTencentImages(query: string): Promise<SearchImage[]>
     const client = new wimgs.v20251106.Client({ credential: { secretId: process.env.TENCENTCLOUD_SECRET_ID, secretKey: process.env.TENCENTCLOUD_SECRET_KEY, token: process.env.TENCENTCLOUD_TOKEN || undefined },
       profile: { signMethod: 'TC3-HMAC-SHA256', httpProfile: { endpoint: 'wimgs.tencentcloudapi.com', protocol: 'https://', reqTimeout: 12 } },
     })
-    const signal = AbortSignal.timeout(12_000)
+    const signal = AbortSignal.any([AbortSignal.timeout(12_000), ...(parentSignal ? [parentSignal] : [])])
     try {
       // SDK's generic request supports AbortSignal; the generated convenience method only exposes a callback.
       const payload = ResponseSchema.parse(await client.request('SearchByText', { Query: query }, { signal }))

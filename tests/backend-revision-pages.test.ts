@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, it } from 'vitest'
 
 it.each([
-  ['mixedEditsRevision', '混用工具复用同轮版本、revision 检测旧快照且无变化跳过'],
+  ['mixedEditsRevision', '混用工具复用同轮草稿、revision 检测旧快照且完成后分叉'],
   ['messageAtomic', 'AI 预览与版本原子提交并验证消息作用域'],
   ['systemAtomic', '手工保存和切换的通知失败撤销全部写入'],
   ['revisionMetadataAndSwitch', '修订号覆盖正文和指针变化并避免无变化递增'],

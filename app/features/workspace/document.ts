@@ -1,8 +1,8 @@
 import { ref, type Ref } from 'vue'
 import type { Plan } from '#shared/schemas/plan'
 import { idbGet, idbSet } from '~/utils/idb'
-import { api, type PlanDetail, type VersionItem } from '~/utils/api'
-import { mergeById } from './catalog'
+import { api, type PlanDetail } from '~/utils/api'
+import { VersionMetadataSchema, type VersionMetadata } from '../../utils/version-metadata'
 
 /** Document snapshots and revisions stay together; every write uses the existing server transaction. */
 export function createWorkspaceDocument(context: {
@@ -13,7 +13,7 @@ export function createWorkspaceDocument(context: {
   errorMessage: Ref<string>
 }) {
 
-  const versions = ref<VersionItem[]>([])
+  const versions = ref<VersionMetadata[]>([])
   const currentPlan = ref<PlanDetail | null>(null)
   const offline = ref(false)
   const versionsHasMore = ref(false)
@@ -66,23 +66,99 @@ export function createWorkspaceDocument(context: {
     }
   }
 
-  async function loadVersions(more = false) {
+  function mergeVersions(incoming: VersionMetadata[]) {
+    const merged = new Map(versions.value.map(item => [item.id, item]))
+    for (const raw of incoming) {
+      const item = VersionMetadataSchema.parse(raw)
+      const known = merged.get(item.id)
+      // A list request started before a rename must not undo the returned name.
+      merged.set(item.id, known && known.nameRevision > item.nameRevision
+        ? { ...item, name: known.name, nameSource: known.nameSource, nameRevision: known.nameRevision }
+        : item)
+    }
+    versions.value = [...merged.values()].sort((a, b) => b.version - a.version)
+  }
+
+  async function loadVersions(more = false, force = false) {
     const plan = currentPlan.value
-    if (!plan || offline.value || loadingVersions.value || (!more && versionsRevision === plan.revision)) return false
+    if (!plan || offline.value || (!force && loadingVersions.value) || (!more && !force && versionsRevision === plan.revision)) return false
+    if (more && !versionsHasMore.value) return false
     const token = context.navigation()
+    const epoch = context.lifetime()
     const request = ++versionsRequest
+    const valid = () => epoch === context.lifetime() && token === context.navigation() && request === versionsRequest && currentPlan.value?.id === plan.id
+    const oldestLoaded = versions.value.at(-1)?.version
     loadingVersions.value = true
     try {
-      const result = await api.plans.versionsPage(plan.id, more ? versionsCursor ?? undefined : undefined)
-      if (token !== context.navigation() || request !== versionsRequest || currentPlan.value?.id !== plan.id) return false
-      versions.value = mergeById(more || versions.value.length ? versions.value : [], result.items).sort((a, b) => b.version - a.version)
+      let result = await api.plans.versionsPage(plan.id, more ? versionsCursor ?? undefined : undefined)
+      const items = [...result.items]
+      const cursors = new Set<string>()
+      // Refresh the entire loaded window, including names on older pages. Renaming
+      // does not increment the plan revision, so callers can explicitly force this.
+      while (valid() && !more && oldestLoaded !== undefined && result.hasMore && result.nextCursor
+        && result.items.length && Math.min(...result.items.map(item => item.version)) > oldestLoaded) {
+        if (cursors.has(result.nextCursor)) throw new Error('历史分页游标未推进，请重试。')
+        cursors.add(result.nextCursor)
+        result = await api.plans.versionsPage(plan.id, result.nextCursor)
+        items.push(...result.items)
+      }
+      if (!valid()) return false
+      mergeVersions(items)
       versionsCursor = result.nextCursor
       versionsHasMore.value = result.hasMore
       versionsRevision = plan.revision
+      // An AI edit may complete while the list is loading. Its watcher cannot
+      // start another request until this one settles, so reconcile it here.
+      if (currentPlan.value?.revision !== plan.revision) {
+        loadingVersions.value = false
+        return loadVersions(false, true)
+      }
       return true
+    } catch (error) {
+      if (!valid()) return false
+      throw error
     } finally {
       if (request === versionsRequest) loadingVersions.value = false
     }
+  }
+
+  // These two methods report errors to the dialog, where the name draft and its
+  // independent optimistic lock can be retained without replacing plan state.
+  async function refreshVersionMetadata(version: number) {
+    ensureOnline()
+    const plan = currentPlan.value
+    if (!plan) return null
+    const token = context.navigation()
+    const epoch = context.lifetime()
+    const valid = () => token === context.navigation() && epoch === context.lifetime() && currentPlan.value?.id === plan.id
+    let cursor: string | undefined
+    const cursors = new Set<string>()
+    do {
+      const result = await api.plans.versionsPage(plan.id, cursor)
+      if (!valid()) return null
+      const item = result.items.find(item => item.version === version)
+      // Do not insert unrequested pages: opening a preview cannot change node count.
+      mergeVersions(result.items.filter(item => versions.value.some(known => known.id === item.id)))
+      if (item) return versions.value.find(known => known.id === item.id) ?? VersionMetadataSchema.parse(item)
+      if (!result.hasMore || !result.nextCursor) break
+      if (cursors.has(result.nextCursor)) throw new Error('历史分页游标未推进，请重试。')
+      cursor = result.nextCursor
+      cursors.add(cursor)
+    } while (valid())
+    if (!valid()) return null
+    throw new Error('未找到该版本的名称信息，请刷新版本列表。')
+  }
+
+  async function renameVersion(version: number, name: string, expectedNameRevision: number) {
+    ensureOnline()
+    const plan = currentPlan.value
+    if (!plan) return null
+    const token = context.navigation()
+    const epoch = context.lifetime()
+    const result = await api.plans.renameVersion(plan.id, version, { name, expectedNameRevision })
+    if (token !== context.navigation() || epoch !== context.lifetime() || currentPlan.value?.id !== plan.id) return null
+    mergeVersions([result.version])
+    return versions.value.find(item => item.id === result.version.id) ?? result.version
   }
 
   async function updatePlanMeta(patch: {
@@ -145,6 +221,23 @@ export function createWorkspaceDocument(context: {
     await refreshAfterMutation(plan.id, conversationId, token)
   }
 
+  // A recovery uses the snapshot the user compared, never a newer revision inferred at click time.
+  async function restoreDraft(draftId: number, expectedVersion: number, expectedRevision: number) {
+    ensureOnline()
+    const plan = currentPlan.value
+    if (!plan) return null
+    const token = context.navigation()
+    const epoch = context.lifetime()
+    const valid = () => token === context.navigation() && epoch === context.lifetime() && currentPlan.value?.id === plan.id
+    const conversationId = context.matchingConversation(plan.id)
+    const result = await api.plans.restoreDraft(plan.id, draftId, { expectedVersion, expectedRevision, conversationId })
+    if (!valid()) return null
+    await refreshAfterMutation(plan.id, conversationId, token)
+    if (!valid()) return null
+    await loadVersions(false, true)
+    return valid() ? result : null
+  }
+
   function invalidate() { planRequest++ }
 
   function reset() {
@@ -159,5 +252,5 @@ export function createWorkspaceDocument(context: {
     versionsHasMore.value = loadingVersions.value = false
   }
 
-  return { versions, currentPlan, offline, savedAt, loadingVersions, versionsHasMore, clearOtherPlan, loadPlan, loadVersions, updatePlanMeta, savePlan, switchVersion, ensureOnline, refreshAfterMutation, invalidate, reset }
+  return { versions, currentPlan, offline, savedAt, loadingVersions, versionsHasMore, clearOtherPlan, loadPlan, loadVersions, refreshVersionMetadata, renameVersion, updatePlanMeta, savePlan, switchVersion, restoreDraft, ensureOnline, refreshAfterMutation, invalidate, reset }
 }

@@ -48,4 +48,26 @@ describe('版本路线图布局', () => {
       expect(item.y + item.height).toBeLessThanOrEqual(layout.height)
     }
   })
+
+  it('数千层历史无需递归调用栈且每条父边都保留', () => {
+    const versions = Array.from({ length: 6000 }, (_, index) => node(index + 1, index + 1, index || null))
+    const layout = layoutVersionTree(versions)
+    expect(layout.nodes).toHaveLength(6000)
+    expect(layout.edges).toHaveLength(5999)
+    expect(layout.nodes.at(-1)?.depth).toBe(5999)
+  })
+
+  it('宽分叉的兄弟独立布局且深层边不会连接相邻兄弟', () => {
+    const layout = layoutVersionTree([node(1, 1, null), ...Array.from({ length: 100 }, (_, index) => node(index + 2, index + 2, 1)), node(102, 102, 2)])
+    const siblings = layout.nodes.filter(item => item.parentVersionId === 1).sort((a, b) => a.x - b.x)
+    for (let index = 1; index < siblings.length; index += 1) expect(siblings[index]!.x).toBeGreaterThan(siblings[index - 1]!.x + siblings[index - 1]!.width)
+    expect(layout.edges.find(edge => edge.to.id === 102)?.from.id).toBe(2)
+    expect(layout.edges.filter(edge => edge.from.id === 1)).toHaveLength(100)
+  })
+
+  it('异常循环和独立历史仍各显示一次，且不产生自环连线', () => {
+    const layout = layoutVersionTree([node(1, 1, null), node(2, 2, 3), node(3, 3, 2), node(4, 4, 4)])
+    expect(layout.nodes.map(item => item.id).sort()).toEqual([1, 2, 3, 4])
+    expect(layout.edges.every(edge => edge.from.id !== edge.to.id)).toBe(true)
+  })
 })

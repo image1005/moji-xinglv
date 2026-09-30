@@ -1,6 +1,6 @@
 import { handleChatStream } from '@mastra/ai-sdk'
 import type { UIMessageChunk } from 'ai'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gte, lt } from 'drizzle-orm'
 import { createError, type H3Event } from 'h3'
 import { extractUserText, trustedHistory } from '../../shared/schemas/chat'
 import type { ChatRequest } from '../../shared/schemas/chat-protocol'
@@ -8,7 +8,7 @@ import { PlanMutationResultSchema } from '../../shared/schemas/preview'
 import { buildInstructions, createTravelMastra } from '../agents/travel-agent'
 import { ALL_TOOLS, MUTATION_TOOLS } from '../agents/tool-names'
 import { toolInputError } from '../agents/tool-inputs'
-import { messages, planVersions } from '../database/schema'
+import { messages, planRunDrafts, planVersions } from '../database/schema'
 import { resolveAgentsMd } from '../services/agents-md'
 import { appendMessage, getConversation, listMessages, touchConversation } from '../services/conversation'
 import { getPlanSnapshot } from '../services/plan'
@@ -24,7 +24,8 @@ import { resolveModelConfiguration } from './model-settings'
 import { resolveAttachments, attachmentModelParts } from './attachments'
 import { modelCapabilities } from '../providers/models'
 
-const FAILURE = '本次生成未完成，请检查 AI 服务配置后重试。已经保存的行程版本会保留。'
+const FAILURE = '本次生成未完成，请检查 AI 服务配置后重试。上一成功版本会保留，已生成的部分成果可在草稿中查看和恢复。'
+const TIMEOUT = '本次生成超时，已停止等待。上一成功版本会保留，部分成果可在草稿中查看和恢复；请稍后重试或分批安排日程。'
 const TOOL_FAILURE = '工具执行失败，请重新读取当前规划后重试'
 
 export async function executeChat(event: H3Event, user: { id: string; name: string; email: string }, body: ChatRequest) {
@@ -41,9 +42,10 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
   const task = claimRun(user.id, body.requestId, planId, conversationId, { text: textInput, attachmentIds, configuration })
   const run = new AbortController()
   let clientCancelled = false
+  let timedOut = false
   const onDisconnect = () => { clientCancelled = true; run.abort() }
   event.node?.res?.once('close', onDisconnect)
-  const deadline = setTimeout(() => run.abort(), 180000)
+  const deadline = setTimeout(() => { timedOut = true; run.abort() }, config.AI_RUN_TIMEOUT_MS)
   let assistantId: number | undefined
   let checkpointTimer: ReturnType<typeof setInterval> | undefined
   let usage: { inputTokens?: number; outputTokens?: number } = {}
@@ -87,10 +89,12 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
     const mastra = createTravelMastra({ ...agentContext, assistantMessageId: assistantId, onToolComplete: () => checkpointRun(task.id), onModelRequest: () => { stepStartedAt = Date.now(); stepInFlight = true } })
     run.signal.throwIfAborted()
     const initialize = () => handleChatStream({
-      mastra, agentId: 'travel-agent', version: 'v5', onError: (error) => preserveActionableError(error) ?? FAILURE,
+      // Without real reasoning events the client's 45s idle limit aborts an actively thinking model.
+      mastra, agentId: 'travel-agent', version: 'v5', sendReasoning: true, onError: (error) => preserveActionableError(error) ?? FAILURE,
       params: {
         messages: modelMessages, maxSteps: 12, abortSignal: run.signal, toolCallConcurrency: 1,
-        modelSettings: { maxOutputTokens: config.AI_OUTPUT_MAX_TOKENS, maxRetries: 0 },
+        // DeepSeek's max_tokens includes reasoning, tool arguments and the visible answer.
+        modelSettings: { maxOutputTokens: configuration.thinking === 'off' ? config.AI_OUTPUT_MAX_TOKENS : config.AI_THINKING_OUTPUT_MAX_TOKENS, maxRetries: 0 },
         onFinish: result => { usage = { inputTokens: result.totalUsage.inputTokens, outputTokens: result.totalUsage.outputTokens } },
         onStepFinish: result => {
           steps++; stepInFlight = false
@@ -139,7 +143,12 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
             content: text + (cancelled ? '\n\n[生成已停止]' : failed ? `\n\n${failureMessage}` : !text && !toolCalls.length ? '本次未返回文字，请重试。' : ''),
             toolCalls: toolCalls.length ? toolCalls : null,
           }).where(eq(messages.id, assistantRow.id))
-          finishRun(task.id, cancelled ? 'cancelled' : failed ? 'failed' : 'completed', failed ? 'generation_failed' : undefined)
+          const terminal = finishRun(task.id, cancelled ? 'cancelled' : failed ? 'failed' : 'completed', failed ? 'generation_failed' : undefined)
+          if (terminal === 'failed' && !failed) {
+            failed = true
+            failureMessage = '规划已被其他操作更新，本轮成果已保留为恢复草稿，请比较后确认恢复。'
+            await db.update(messages).set({ content: `${text}\n\n${failureMessage}` }).where(eq(messages.id, assistantRow.id))
+          }
           recordUsage(failed || cancelled ? 'error' : 'success')
         } catch (error) { finishRun(task.id, 'failed', 'checkpoint_failed'); throw error }
       })()
@@ -150,10 +159,15 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
         onAbort = () => {
           cancelled ||= clientCancelled
           if (!cancelled) failed = true
+          if (timedOut) failureMessage = TIMEOUT
           // 不等待不合作的上游 cancel 才落库/解锁；工具入口同步检查 AbortSignal。
           cancelReader()
-          void finalize().catch(() => {})
-          try { controller.close() } catch { /* 客户端可能已关闭 */ }
+          void finalize().catch(() => {}).then(() => {
+            try {
+              if (failed && !cancelled) controller.enqueue({ type: 'error', errorText: failureMessage })
+              controller.close()
+            } catch { /* 客户端可能已关闭 */ }
+          })
         }
         run.signal.addEventListener('abort', onAbort, { once: true })
         if (run.signal.aborted) onAbort()
@@ -170,8 +184,8 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
             const lastMutation = toolCalls.findLast(call => typeof call.name === 'string' && MUTATION_TOOLS.has(call.name))
             if (part.finishReason === 'length' || part.finishReason === 'tool-calls' || lastMutation?.error) {
               failed = true
-              failureMessage = part.finishReason === 'length' ? '本轮输出达到长度上限，行程尚未全部完成。已保存版本会保留，请按天分批继续或降低思考深度后重试。'
-                : lastMutation?.error ? `行程编排未完成：${lastMutation.error} 已保存版本会保留。` : '本轮达到工具步骤上限，已保存部分会保留，请继续完成剩余行程。'
+              failureMessage = part.finishReason === 'length' ? '本轮思考与正文达到输出上限，行程尚未全部完成。上一成功版本会保留，部分成果可在草稿中查看和恢复；请按天分批继续，或联系管理员调整输出预算。'
+                : lastMutation?.error ? `行程编排未完成：${lastMutation.error} 上一成功版本会保留，部分成果可在草稿中查看和恢复。` : '本轮达到工具步骤上限，部分成果已保留为恢复草稿，请查看后恢复或继续完成剩余行程。'
               controller.enqueue({ type: 'error', errorText: failureMessage })
             }
           }
@@ -206,7 +220,16 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
               const version = output?.versionId ? await db.select({ id: planVersions.id }).from(planVersions).where(and(
                 eq(planVersions.id, output.versionId), eq(planVersions.planId, planId), eq(planVersions.version, output.version),
               )).get() : null
-              if (!output || output.preview.planId !== planId || output.preview.version !== output.version || !version) {
+              const draft = output?.draftId ? await db.select({ id: planRunDrafts.id, version: planVersions.version }).from(planRunDrafts)
+                .leftJoin(planVersions, and(eq(planVersions.id, planRunDrafts.baseVersionId), eq(planVersions.planId, planId))).where(and(
+                eq(planRunDrafts.id, output.draftId), eq(planRunDrafts.planId, planId), eq(planRunDrafts.runId, task.id),
+                eq(planRunDrafts.messageId, assistantRow.id), eq(planRunDrafts.status, 'active'),
+                // The producer may already have persisted the next tool before this output is consumed.
+                gte(planRunDrafts.revision, output.revision ?? -1), lt(planRunDrafts.baseRevision, output.revision ?? -1),
+              )).get() : null
+              if (!output || output.preview.planId !== planId || output.preview.version !== output.version
+                || (output.draftId ? !draft || (draft.version ?? 0) !== output.version || output.versionId !== null || output.preview.draftId !== output.draftId || output.preview.status !== 'draft'
+                  : !version || output.preview.draftId !== undefined || output.preview.status !== undefined)) {
                 call.error = TOOL_FAILURE
                 controller.enqueue({ type: 'tool-output-error', toolCallId: part.toolCallId as string, errorText: TOOL_FAILURE })
                 return
@@ -257,11 +280,11 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
     event.node?.res?.off('close', onDisconnect)
     finishRun(task.id, clientCancelled ? 'cancelled' : 'failed', clientCancelled ? undefined : 'initialization_failed')
     recordUsage('error')
-    if (assistantId) await db.update(messages).set({ content: clientCancelled ? '[生成已停止]' : FAILURE }).where(eq(messages.id, assistantId))
+    if (assistantId) await db.update(messages).set({ content: clientCancelled ? '[生成已停止]' : timedOut ? TIMEOUT : FAILURE }).where(eq(messages.id, assistantId))
     const status = (error as { statusCode?: number }).statusCode
     if (status && status < 500) {
       throw error
     }
-    throw createError({ statusCode: 502, statusMessage: 'AI 服务暂不可用，请检查服务端配置后重试' })
+    throw createError({ statusCode: timedOut ? 504 : 502, statusMessage: timedOut ? TIMEOUT : 'AI 服务暂不可用，请检查服务端配置后重试' })
   }
 }

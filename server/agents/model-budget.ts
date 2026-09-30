@@ -2,11 +2,16 @@ import type { LanguageModelV2Prompt } from '@ai-sdk/provider'
 import { jsonBytes } from '../services/ai-context'
 import { markActionable } from '../utils/errors'
 import { aiConfig } from '../utils/ai-config'
+import { assertReasoningBudget } from '../utils/reasoning-budget'
 
-/** Image bytes are measured separately, never JSON-stringified into the text budget. */
+/** Images and protocol-required reasoning replay each have their own bounded allowance. */
 function promptTextBytes(prompt: LanguageModelV2Prompt): number {
   let imageBytes = 0; let imageCount = 0
-  const textPrompt = prompt.map(message => message.role === 'system' ? message : ({ ...message, content: message.content.map(part => {
+  const textPrompt = prompt.map(message => message.role === 'system' ? message : ({ ...message, content: message.content.filter(part => {
+    if (part.type !== 'reasoning') return true
+    // This is measurement only; the actual prompt retains exact reasoning and metadata.
+    return false
+  }).map(part => {
     if (part.type !== 'file' || !part.mediaType.startsWith('image/')) return part
     imageCount++
     const data = part.data
@@ -21,7 +26,7 @@ function promptTextBytes(prompt: LanguageModelV2Prompt): number {
 }
 
 /** Compact only redundant mutation previews in provider requests; UI and DB retain the full preview. */
-export function boundModelPrompt(prompt: LanguageModelV2Prompt, toolBytes: number, maxBytes: number): LanguageModelV2Prompt {
+export function boundModelPrompt(prompt: LanguageModelV2Prompt, toolBytes: number, maxBytes: number, maxReasoningBytes = aiConfig().AI_REASONING_MAX_BYTES): LanguageModelV2Prompt {
   // Mastra may normalize inline images to URL objects. Bun's structuredClone rejects URL,
   // so clone the only mutable JSON tool outputs separately and preserve the file representation.
   const bounded: LanguageModelV2Prompt = prompt.map(message => message.role === 'system' ? { ...message } : ({
@@ -41,6 +46,7 @@ export function boundModelPrompt(prompt: LanguageModelV2Prompt, toolBytes: numbe
       if (part.toolName === 'get_plan') reads.push(part)
     }
   }
+  assertReasoningBudget(bounded, maxReasoningBytes)
   // Keep the most recent read intact, and preserve every tool-call/result pair for protocol validity.
   for (const part of reads.slice(0, -1)) {
     if (promptTextBytes(bounded) + toolBytes <= maxBytes) break

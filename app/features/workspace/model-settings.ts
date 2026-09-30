@@ -7,6 +7,7 @@ export function createModelSettings() {
   const configuration = ref<ModelConfiguration | null>(null)
   const capabilities = ref<ModelCapabilities | null>(null)
   const failure = ref('')
+  const adjustmentReason = ref('')
   const saving = ref(false)
   let generation = 0
   let change = 0
@@ -23,6 +24,7 @@ export function createModelSettings() {
         if (epoch !== generation) return
         configuration.value = value.defaults
         capabilities.value = value.capabilities
+        adjustmentReason.value = value.adjustmentReason ?? ''
         failure.value = ''
       } catch (error) {
         if (epoch === generation) failure.value = apiErrorMessage(error, '无法读取模型能力，请重试')
@@ -48,6 +50,7 @@ export function createModelSettings() {
         if (epoch === generation && token === change) {
           configuration.value = saved.defaults
           capabilities.value = saved.capabilities
+          adjustmentReason.value = saved.adjustmentReason ?? ''
         }
       } catch (error) {
         if (epoch === generation && token === change) failure.value = apiErrorMessage(error, '默认配置保存失败，本轮仍使用当前选择')
@@ -68,7 +71,8 @@ export function createModelSettings() {
     capabilities.value = null
     saving.value = false
     failure.value = ''
+    adjustmentReason.value = ''
     pending = null
   }
-  return { configuration, capabilities, failure, saving, load, update, snapshot, reset }
+  return { configuration, capabilities, failure, adjustmentReason, saving, load, update, snapshot, reset }
 }

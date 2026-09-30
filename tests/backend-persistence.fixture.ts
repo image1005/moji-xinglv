@@ -1,24 +1,16 @@
 import assert from 'node:assert/strict'
-import { Database } from 'bun:sqlite'
 import { mock } from 'bun:test'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { eq, sql } from 'drizzle-orm'
 import * as schema from '../server/database/schema'
 import { emptyPlan } from '../shared/schemas/plan'
+import { createMigratedTestDb } from './helpers/migrated-db'
 
-// 只创建内存表，并在导入服务前替换连接；绝不加载实际 db.ts。
-const sqlite = new Database(':memory:')
-const db = drizzle(sqlite, { schema })
-for (const ddl of [
-  'CREATE TABLE plans (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT \'\', content_md TEXT NOT NULL DEFAULT \'\', plan_json TEXT NOT NULL, cover_url TEXT NOT NULL DEFAULT \'\', current_version_id INTEGER, revision INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
-  'CREATE TABLE plan_versions (id INTEGER PRIMARY KEY, plan_id INTEGER NOT NULL, version INTEGER NOT NULL, plan_json TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, parent_version_id INTEGER, source TEXT NOT NULL, diff_json TEXT, message_id INTEGER, UNIQUE(plan_id, version))',
-  'CREATE TABLE conversations (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, plan_id INTEGER NOT NULL, title TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
-  'CREATE TABLE messages (id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, parts_json TEXT, preview_json TEXT, plan_version_id INTEGER, created_at INTEGER NOT NULL)',
-  'CREATE TABLE agents_md (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, plan_id INTEGER, content TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(user_id, plan_id))',
-  'CREATE TABLE cache (key TEXT PRIMARY KEY, value BLOB NOT NULL, type TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL)',
-]) db.run(sql.raw(ddl))
+// 真实迁移只作用于临时内存连接；导入服务前替换连接，绝不加载实际 db.ts。
+const { sqlite, db } = createMigratedTestDb()
 mock.module('../server/utils/db', () => ({ db, sqlite, schema }))
+process.env.AI_API_KEY = ''
 const service = await import('../server/services/plan')
+const runs = await import('../server/services/chat-runs')
 const { plans, planVersions, messages, agentsMd, cache } = schema
 const owner = 'owner'
 const input = emptyPlan('初始规划')
@@ -27,6 +19,15 @@ function createAssistant(planId: number, messageId?: number, userId = owner) {
   const conversation = db.insert(schema.conversations).values({ userId, planId, title: '测试会话' }).returning().get()
   const message = db.insert(messages).values({ id: messageId, conversationId: conversation.id, role: 'assistant', content: '' }).returning().get()
   return { conversationId: conversation.id, messageId: message.id }
+}
+
+function createRunningAssistant(planId: number, messageId?: number) {
+  const assistant = createAssistant(planId, messageId)
+  const run = db.insert(schema.chatRuns).values({
+    userId: owner, planId, conversationId: assistant.conversationId, assistantMessageId: assistant.messageId,
+    requestId: `test-message-${assistant.messageId}`, requestHash: `test-hash-${assistant.messageId}`, status: 'running',
+  }).returning().get()
+  return { ...assistant, runId: run.id }
 }
 
 const cases: Record<string, () => Promise<void>> = {
@@ -218,39 +219,44 @@ const cases: Record<string, () => Promise<void>> = {
   },
   async applyEditsTurn() {
     const { planId } = await service.createPlan(owner, input)
-    createAssistant(planId, 77)
+    const { runId } = createRunningAssistant(planId, 77)
     const first = await service.applyPlanEdits(owner, planId, [
       { target: 'day', action: 'add', value: { city: '绍兴', spots: [] } },
     ], { messageId: 77 })
-    assert.equal(first.version, 2)
+    assert.equal(first.version, 1)
+    assert.equal(first.versionId, null)
     const second = await service.applyPlanEdits(owner, planId, [
       { target: 'checklist', action: 'add', text: '预约门票' },
     ], { messageId: 77 })
-    assert.equal(second.version, 2, '同一轮对话应复用版本')
+    assert.equal(second.version, 1, '执行中的工具只更新恢复草稿')
+    assert.equal(second.draftId, first.draftId)
+    assert.equal(db.select().from(planVersions).all().length, 1)
+    assert.equal((await service.getPlanSnapshot(owner, planId)).plan.days.length, 0, '上一成功结果不被中间成果覆盖')
+    assert.equal((await service.getPlanSnapshot(owner, planId, 77)).plan.days[0]?.city, '绍兴')
+    runs.finishRun(runId, 'completed')
     assert.equal(db.select().from(planVersions).all().length, 2)
     const v2 = db.select().from(planVersions).all().find((row) => row.version === 2)!
     const stored = JSON.parse(JSON.stringify(v2.planJson)) as { days: { city: string }[]; checklist: { text: string }[] }
     assert.equal(stored.days[0]!.city, '绍兴')
     assert.equal(stored.checklist[0]!.text, '预约门票')
     assert.ok(Array.isArray(v2.diffJson) && v2.diffJson.length >= 2, 'diff 应对父版本重算')
-    // 指针被用户保存移动后，AI 继续编辑必须追加新版本而不是改写旧版本
+    // 已结束轮次的迟到工具不得覆盖已完成结果。
     const state = await service.getPlanSnapshot(owner, planId)
     await service.savePlanVersion(owner, planId, {
       planJson: { ...state.plan, summary: '用户补充' }, source: 'user', expectedVersion: 2,
     })
-    const third = await service.applyPlanEdits(owner, planId, [
+    await assert.rejects(service.applyPlanEdits(owner, planId, [
       { target: 'plan', action: 'update', value: { tags: ['慢行'] } },
-    ], { messageId: 77 })
-    assert.equal(third.version, 4, '指针已移动后应追加新版本')
-    assert.equal(db.select().from(planVersions).all().length, 4)
+    ], { messageId: 77 }), { statusCode: 409 })
+    assert.equal(db.select().from(planVersions).all().length, 3)
     // 无 expectedVersion 可直接编辑；显式过期 CAS 返回 409
     await assert.rejects(
-      service.applyPlanEdits(owner, planId, [{ target: 'plan', action: 'update', value: { summary: 'x' } }], { messageId: 91, expectedVersion: 1 }),
+      service.applyPlanEdits(owner, planId, [{ target: 'plan', action: 'update', value: { summary: 'x' } }], { expectedVersion: 1 }),
       { statusCode: 409 },
     )
     // 未知字段与越界在写入前拒绝，且不产生版本
     await assert.rejects(
-      service.applyPlanEdits(owner, planId, [{ target: 'day', action: 'update', index: 0, value: { stay: '民宿' } }], { messageId: 92 }),
+      service.applyPlanEdits(owner, planId, [{ target: 'day', action: 'update', index: 0, value: { stay: '民宿' } }]),
       (error: { statusCode?: number; statusMessage?: string }) => {
         assert.equal(error.statusCode, 400)
         assert.match(String(error.statusMessage), /stay|lodging/)
@@ -258,14 +264,14 @@ const cases: Record<string, () => Promise<void>> = {
       },
     )
     await assert.rejects(
-      service.applyPlanEdits(owner, planId, [{ target: 'spot', action: 'remove', day: 9, index: 0 }], { messageId: 93 }),
+      service.applyPlanEdits(owner, planId, [{ target: 'spot', action: 'remove', day: 9, index: 0 }]),
       (error: { statusCode?: number; statusMessage?: string }) => {
         assert.equal(error.statusCode, 400)
         assert.match(String(error.statusMessage), /第 1 项编辑/)
         return true
       },
     )
-    assert.equal(db.select().from(planVersions).all().length, 4, '失败的编辑不产生版本')
+    assert.equal(db.select().from(planVersions).all().length, 3, '失败的编辑不产生版本')
   },
   async scope() {
     const { planId } = await service.createPlan(owner, input)
@@ -308,32 +314,35 @@ const cases: Record<string, () => Promise<void>> = {
   async mixedEditsRevision() {
     const { planId, revision } = await service.createPlan(owner, input)
     assert.equal(revision, 1)
-    const { messageId } = createAssistant(planId)
+    const { messageId, runId } = createRunningAssistant(planId)
     const first = await service.applyPlanEdits(owner, planId, [{ target: 'plan', action: 'update', value: { summary: 'first' } }], { messageId, expectedRevision: 1 })
-    const stale = await service.getPlanSnapshot(owner, planId)
+    const stale = await service.getPlanSnapshot(owner, planId, messageId)
     const second = await service.patchPlan(owner, planId, { title: 'second' }, { source: 'ai', messageId, expectedRevision: 2 })
     const third = await service.applyPlanEdits(owner, planId, [{ target: 'checklist', action: 'add', text: '订票' }], { messageId, expectedRevision: 3 })
-    assert.deepEqual([first.version, second.version, third.version], [2, 2, 2])
+    assert.deepEqual([first.version, second.version, third.version], [1, 1, 1])
     assert.deepEqual([first.revision, second.revision, third.revision], [2, 3, 4])
-    assert.equal(db.select().from(planVersions).all().length, 2)
+    assert.equal(db.select().from(planVersions).all().length, 1)
     const preview = db.select().from(messages).where(eq(messages.id, messageId)).get()!
     assert.equal(preview.planVersionId, third.versionId)
     assert.deepEqual(preview.previewJson, JSON.parse(JSON.stringify(third.preview)))
-    await assert.rejects(service.savePlanVersion(owner, planId, { source: 'user', planJson: stale.plan, expectedVersion: 2, expectedRevision: 2 }), { statusCode: 409 })
+    await assert.rejects(service.savePlanVersion(owner, planId, { source: 'user', planJson: stale.plan, expectedVersion: 1, expectedRevision: 2 }), { statusCode: 409 })
     const unchanged = await service.patchPlan(owner, planId, { title: 'second' }, { source: 'ai', messageId, expectedRevision: 4 })
     assert.equal(unchanged.skipped, true)
     assert.equal(unchanged.revision, 4)
-    assert.equal(db.select().from(planVersions).all().length, 2)
-    await service.switchToVersion(owner, planId, 1, { expectedRevision: 4 })
-    const fork = await service.patchPlan(owner, planId, { title: 'fork' }, { source: 'ai', messageId, expectedRevision: 5 })
-    assert.equal(fork.version, 3)
-    assert.equal(fork.revision, 6)
-    const version = db.select().from(planVersions).where(eq(planVersions.id, fork.versionId!)).get()!
+    assert.equal(db.select().from(planVersions).all().length, 1)
+    runs.finishRun(runId, 'completed')
+    const completed = await service.getPlanSnapshot(owner, planId)
+    await service.switchToVersion(owner, planId, 1, { expectedRevision: completed.row.revision })
+    const newRound = createRunningAssistant(planId)
+    await service.patchPlan(owner, planId, { title: 'fork' }, { source: 'ai', messageId: newRound.messageId, expectedRevision: completed.row.revision + 1 })
+    runs.finishRun(newRound.runId, 'completed')
+    const version = (await service.getPlanSnapshot(owner, planId)).current!
+    assert.equal(version.version, 3)
     assert.equal(version.parentVersionId, db.select().from(planVersions).where(eq(planVersions.version, 1)).get()!.id)
   },
   async messageAtomic() {
     const { planId } = await service.createPlan(owner, input)
-    const { messageId } = createAssistant(planId)
+    const { messageId } = createRunningAssistant(planId)
     const other = await service.createPlan(owner, input)
     const foreign = createAssistant(other.planId)
     await assert.rejects(service.patchPlan(owner, planId, { title: 'bad' }, { source: 'ai', messageId: foreign.messageId }), { statusCode: 404 })
@@ -455,7 +464,6 @@ const cases: Record<string, () => Promise<void>> = {
     await assert.rejects(listConversationsPage('other', planIds[0]), { statusCode: 404 })
   },
   async seedIdempotent() {
-    db.run(sql.raw('CREATE TABLE user (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, email_verified INTEGER NOT NULL DEFAULT 0, image TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, role TEXT, banned INTEGER DEFAULT 0, ban_reason TEXT, ban_expires INTEGER)'))
     process.env.SEED_ADMIN_EMAIL = 'seed@example.test'
     process.env.SEED_ADMIN_PASSWORD = 'explicit-seed-password'
     let signups = 0

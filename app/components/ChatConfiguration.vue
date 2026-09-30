@@ -1,34 +1,43 @@
 <script setup lang="ts">
-import type { ModelConfiguration } from '#shared/schemas/model-config'
-
 defineProps<{ disabled: boolean }>()
 const { modelSettings } = useWorkspace()
-const { configuration, capabilities, failure, saving } = modelSettings
-const levels = [{ value: 'off', label: '关闭' }, { value: 'light', label: '轻量' }, { value: 'standard', label: '标准' }, { value: 'deep', label: '深度' }] as const
+const { configuration, capabilities, failure, adjustmentReason, saving } = modelSettings
+const descriptionId = `model-capabilities-${useId()}`
+const searchDescription = computed(() => {
+  const search = capabilities.value?.search
+  if (!search) return '正在读取模型能力…'
+  if (!search.available) return search.unavailableReason || '尚未配置可用的搜索服务，智能搜索暂不可用'
+  return search.native ? '联网由 DeepSeek 官方搜索提供' : `联网由 ${search.provider} 独立搜索工具提供`
+})
 onMounted(() => { void modelSettings.load() })
-function thinkingChanged(event: Event) { modelSettings.update({ thinking: (event.target as HTMLSelectElement).value as ModelConfiguration['thinking'] }) }
 </script>
 
 <template>
   <div class="chat-configuration">
     <div class="chat-configuration__fields">
-      <label><input type="checkbox" :checked="configuration?.webSearch ?? false" :disabled="disabled || !capabilities?.search.available" @change="modelSettings.update({ webSearch: ($event.target as HTMLInputElement).checked })">联网搜索</label>
-      <label>思考深度<select aria-label="思考深度" :value="configuration?.thinking ?? 'off'" :disabled="disabled || !capabilities" @change="thinkingChanged"><option v-for="level in levels" :key="level.value" :value="level.value" :disabled="!capabilities?.thinkingLevels.includes(level.value)">{{ level.label }}{{ capabilities && !capabilities.thinkingLevels.includes(level.value) ? '（不支持）' : '' }}</option></select></label>
-      <span v-if="configuration" class="chat-configuration__model">{{ configuration.model }}</span>
-      <span v-if="saving" role="status">保存默认选择…</span>
+      <ChatThinkingMenu :value="configuration?.thinking ?? 'off'" :levels="capabilities?.thinkingLevels ?? []" :disabled="disabled || !capabilities" :unavailable-reason="capabilities?.thinkingUnavailableReason" @change="modelSettings.update({ thinking: $event })" />
+      <ChatSearchToggle :enabled="configuration?.webSearch ?? false" :available="capabilities?.search.available ?? false" :disabled="disabled || !capabilities" :description-id="descriptionId" @change="modelSettings.update({ webSearch: $event })" />
+      <span v-if="configuration" class="chat-configuration__model" :title="configuration.model">{{ configuration.model }}</span>
+      <span v-if="saving" class="chat-configuration__saving" role="status">正在保存…</span>
     </div>
-    <p v-if="capabilities">{{ capabilities.search.available ? capabilities.search.native ? '联网由 DeepSeek 官方搜索提供' : `联网由 ${capabilities.search.provider} 独立搜索工具提供` : '联网搜索尚未配置，请检查服务端搜索配置' }} · {{ capabilities.vision ? '支持图片理解' : '当前模型不支持图片理解' }}</p>
-    <p v-if="failure" role="alert">{{ failure }} <button type="button" @click="modelSettings.load(true)">重新加载</button></p>
+    <p :id="descriptionId">{{ searchDescription }}<template v-if="capabilities"> · {{ capabilities.vision ? '支持图片理解' : '当前模型不支持图片理解' }}</template></p>
+    <p v-if="adjustmentReason" class="chat-configuration__adjustment" role="status">{{ adjustmentReason }}</p>
+    <p v-if="failure" class="chat-configuration__failure" role="alert">
+      {{ failure }}<template v-if="configuration">；当前选择尚未保存，刷新后可能恢复上次配置。</template>
+      <button v-if="configuration" type="button" :disabled="saving" @click="modelSettings.update({})">重试保存</button>
+      <button v-else type="button" @click="modelSettings.load(true)">重新加载</button>
+    </p>
   </div>
 </template>
 
 <style scoped>
 .chat-configuration { color: var(--text-muted); font-size: 11px; padding: 8px 2px; }
-.chat-configuration__fields { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; }
-.chat-configuration label { display: inline-flex; gap: 6px; align-items: center; white-space: nowrap; }
-.chat-configuration input { accent-color: var(--bamboo); }
-.chat-configuration select { max-width: 130px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-primary); padding: 4px 6px; border-radius: 4px; }
+.chat-configuration__fields { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .chat-configuration p { margin: 7px 0 0; line-height: 1.6; }
-.chat-configuration__model { overflow: hidden; max-width: 160px; text-overflow: ellipsis; }
-.chat-configuration button { background: transparent; border: 0; color: var(--cinnabar); cursor: pointer; }
+.chat-configuration__model { overflow: hidden; max-width: 160px; text-overflow: ellipsis; white-space: nowrap; margin-left: auto; }
+.chat-configuration__saving { color: var(--bamboo); }
+.chat-configuration__adjustment { color: var(--gold-deep); }
+.chat-configuration__failure { color: var(--cinnabar); }
+.chat-configuration__failure button { padding: 3px 6px; background: transparent; border: 0; color: var(--cinnabar); text-decoration: underline; font: inherit; cursor: pointer; }
+@media (max-width: 480px) { .chat-configuration__model { max-width: 100%; margin-left: 0; } }
 </style>

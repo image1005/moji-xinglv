@@ -1,0 +1,481 @@
+{
+  "passed": true,
+  "runId": "2026-09-30T01-40-40-004Z",
+  "uiOnly": false,
+  "reasoningMs": 4000,
+  "runTimeoutMs": 6000,
+  "steps": [
+    {
+      "name": "临时数据库、生产应用与回环模型启动",
+      "status": "passed",
+      "durationMs": 1192
+    },
+    {
+      "name": "思考菜单键盘、选中状态、Escape 与外部点击焦点",
+      "status": "passed",
+      "durationMs": 194
+    },
+    {
+      "name": "全部支持档位 × 独立搜索开关：刷新、请求快照、思考后工具与正文",
+      "status": "passed",
+      "durationMs": 5731
+    },
+    {
+      "name": "配置保存失败可见、重试保存并刷新保留",
+      "status": "passed",
+      "durationMs": 348
+    },
+    {
+      "name": "深度思考停止后结束状态并可再次发送",
+      "status": "passed",
+      "durationMs": 949
+    },
+    {
+      "name": "持续思考片段经过 JSONL 到达浏览器，再继续工具调用与正文",
+      "status": "passed",
+      "durationMs": 4951
+    },
+    {
+      "name": "供应商失败、思考耗尽预算及有界超时之后均可重新发送",
+      "status": "passed",
+      "durationMs": 10281
+    },
+    {
+      "name": "移动端及横屏弹层位于视口内、独立开关与焦点返回",
+      "status": "passed",
+      "durationMs": 326
+    },
+    {
+      "name": "明确的能力响应夹具：不支持项禁用并说明原因",
+      "status": "passed",
+      "durationMs": 313
+    },
+    {
+      "name": "无未捕获浏览器异常，所有供应商调用保持隔离",
+      "status": "passed",
+      "durationMs": 0
+    }
+  ],
+  "snapshots": [
+    {
+      "thinking": "off",
+      "webSearch": false,
+      "requestId": "98d44481-10c2-421f-a226-f9f42a835e6e"
+    },
+    {
+      "thinking": "off",
+      "webSearch": true,
+      "requestId": "220f2e59-43c3-4306-8d0b-aceda5b94316"
+    },
+    {
+      "thinking": "light",
+      "webSearch": false,
+      "requestId": "78f324b3-390c-4636-a4a1-07eda5ddb10c"
+    },
+    {
+      "thinking": "light",
+      "webSearch": true,
+      "requestId": "4fd65a71-a1a6-4754-8eb1-f13ebcb7a45b"
+    },
+    {
+      "thinking": "standard",
+      "webSearch": false,
+      "requestId": "4366f662-474a-4230-9372-1d36d4f5994a"
+    },
+    {
+      "thinking": "standard",
+      "webSearch": true,
+      "requestId": "728a88cd-9f89-44f5-8d18-f94d5e7c9516"
+    },
+    {
+      "thinking": "deep",
+      "webSearch": false,
+      "requestId": "e835ea7b-76f2-4acc-8ec7-b534047ee6ce"
+    },
+    {
+      "thinking": "deep",
+      "webSearch": true,
+      "requestId": "e6d0adea-4a68-4e7a-897b-211403a97771"
+    }
+  ],
+  "pageErrors": [],
+  "blockedExternalResources": [],
+  "mock": {
+    "requests": [
+      {
+        "marker": "thinking-case-1",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-1",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-2",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-2",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-2",
+        "thinking": "disabled",
+        "maxTokens": 4096,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-3",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-3",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-4",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-4",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-4",
+        "thinking": "enabled",
+        "effort": "low",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-5",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-5",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-6",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-6",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-6",
+        "thinking": "enabled",
+        "effort": "high",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-7",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-7",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": false,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-8",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-8",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-8",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-9",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-10",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-10",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-10",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-11",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-11",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-11",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-12",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-13",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-13",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-13",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-14",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-15",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-15",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-15",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-16",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-17",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": false,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-17",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      },
+      {
+        "marker": "thinking-case-17",
+        "thinking": "enabled",
+        "effort": "max",
+        "maxTokens": 32768,
+        "searchEnabled": true,
+        "continuation": true,
+        "reasoningPreserved": true
+      }
+    ],
+    "completed": 36,
+    "cancelled": 2,
+    "tools": [
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web",
+      "get_plan",
+      "search_web"
+    ],
+    "rejected": []
+  },
+  "scope": "Production Nuxt UI/HTTP, temporary migrated SQLite, installed DeepSeek SDK + Mastra, local official-shaped SSE and intercepted Tavily responses. Unsupported-state display uses an explicitly replaced capability response. Chromium viewports do not emulate a real system keyboard. No real provider availability or answer-quality claim."
+}

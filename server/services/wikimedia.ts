@@ -31,11 +31,11 @@ function api(host: string, params: Record<string, string>) {
 }
 
 /** Exact titles first, city-qualified encyclopedia lookup second, independently indexed Commons photos last. */
-export async function acquireWikimediaImage(entity: PlanEntity, retryMissing = false): Promise<AcquiredImage | null> {
+export async function acquireWikimediaImage(entity: PlanEntity, retryMissing = false, parentSignal?: AbortSignal): Promise<AcquiredImage | null> {
   const cacheId = await hashKey('wikimedia-identity-v3', { name: entity.name, city: entity.city, type: entity.entityType })
   const cached = await getCachedJson<AcquiredImage | { missing: true }>(cacheId)
   if (cached && 'missing' in cached && !retryMissing) return null
-  const signal = AbortSignal.timeout(30_000)
+  const signal = AbortSignal.any([AbortSignal.timeout(24_000), ...(parentSignal ? [parentSignal] : [])])
   const errors: unknown[] = []
   if (cached && !('missing' in cached)) {
     try { await getResourceImageBytes(cached.originUrl, cached.cacheKey, signal); return cached } catch (error) { errors.push(error) }

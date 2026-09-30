@@ -23,12 +23,17 @@ const mocks = vi.hoisted(() => ({
   where: vi.fn(),
   select: vi.fn(),
   versionGet: vi.fn(),
+  draftGet: vi.fn(), terminalStatus: vi.fn(),
   claimRun: vi.fn(), finishRun: vi.fn(), checkpointRun: vi.fn(),
+  resolveModelConfiguration: vi.fn(),
 }))
 
 vi.mock('@mastra/ai-sdk', () => ({ handleChatStream: mocks.handleChatStream }))
-vi.mock('../server/services/chat-jsonl', () => ({ jsonlChatResponse: (stream: unknown) => mocks.createUIMessageStreamResponse({ stream }) }))
-vi.mock('../server/services/model-settings', () => ({ resolveModelConfiguration: async () => ({ model: 'test-model', webSearch: false, thinking: 'off' }) }))
+vi.mock('../server/services/chat-jsonl', () => ({ jsonlChatResponse: (stream: unknown, _identity: unknown, status: unknown) => {
+  mocks.terminalStatus(status)
+  return mocks.createUIMessageStreamResponse({ stream })
+} }))
+vi.mock('../server/services/model-settings', () => ({ resolveModelConfiguration: mocks.resolveModelConfiguration }))
 vi.mock('../server/services/attachments', () => ({ resolveAttachments: async () => [], attachmentModelParts: async () => [] }))
 vi.mock('../server/providers/models', () => ({ modelCapabilities: () => ({ vision: false }) }))
 vi.mock('h3', async (importOriginal) => {
@@ -118,6 +123,7 @@ beforeEach(() => {
   vi.resetAllMocks()
   vi.useFakeTimers()
   vi.stubEnv('AI_API_KEY', 'chat-test-dummy-key')
+  mocks.resolveModelConfiguration.mockResolvedValue({ model: 'test-model', webSearch: false, thinking: 'off' })
   vi.stubGlobal('defineEventHandler', (value: unknown) => value)
   mocks.body = { planId, conversationId, messages: [textMessage('user', '请安排明天行程')] }
   mocks.requireUser.mockResolvedValue({ id: 'test-owner', name: '测试用户', email: 'test@example.test' })
@@ -146,11 +152,17 @@ beforeEach(() => {
   mocks.set.mockReturnValue({ where: mocks.where })
   mocks.where.mockResolvedValue(undefined)
   mocks.versionGet.mockReturnValue({ id: 202, planId, version: 2 })
-  mocks.select.mockReturnValue({ from: () => ({
-    where: (condition: SQL) => ({
+  mocks.select.mockReturnValue({ from: () => {
+    const where = (condition: SQL) => ({
       get: () => {
         // 用真实 Drizzle SQL 验证三重过滤，不把其他规划的行伪装成查询命中。
         const query = new SQLiteSyncDialect().sqlToQuery(condition)
+        if (query.sql.includes('"plan_run_drafts"')) {
+          const draft = mocks.draftGet() as { id: number; planId: number; runId: number; messageId: number; status: string; revision: number; baseRevision: number; version: number } | undefined
+          for (const column of ['id', 'plan_id', 'run_id', 'message_id', 'status', 'revision', 'base_revision']) expect(query.sql).toContain(`"plan_run_drafts"."${column}"`)
+          return draft && [draft.id, draft.planId, draft.runId, draft.messageId, draft.status].every((value, index) => value === query.params[index])
+            && draft.revision >= Number(query.params[5]) && draft.baseRevision < Number(query.params[6]) ? draft : undefined
+        }
         const row = mocks.versionGet() as { id: number; planId: number; version: number } | undefined
         if (!row) return undefined
         expect(query.sql).toContain('"plan_versions"."id"')
@@ -159,8 +171,9 @@ beforeEach(() => {
         return row.id === query.params[0] && row.planId === query.params[1] && row.version === query.params[2]
           ? row : undefined
       },
-    }),
-  }) })
+    })
+    return { where, leftJoin: () => ({ where }) }
+  } })
 })
 
 afterEach(async () => {
@@ -174,6 +187,49 @@ afterEach(async () => {
 })
 
 describe('聊天 handler 的生命周期与规划锁', () => {
+  it.each(['off', 'light', 'standard', 'deep'])('%s 使用独立有界输出预算并保留本轮思考与搜索快照', async (thinking) => {
+    vi.stubEnv('AI_OUTPUT_MAX_TOKENS', '4096')
+    vi.stubEnv('AI_THINKING_OUTPUT_MAX_TOKENS', '32768')
+    for (const webSearch of [false, true]) {
+      const configuration = { model: 'test-model', thinking, webSearch }
+      mocks.resolveModelConfiguration.mockResolvedValue(configuration)
+      await drain(await (await handler())({}))
+      expect(mocks.claimRun.mock.calls.at(-1)?.[4]).toMatchObject({ configuration })
+      expect(mocks.createTravelMastra.mock.calls.at(-1)?.[0]).toMatchObject({ configuration })
+      expect(mocks.handleChatStream.mock.calls.at(-1)?.[0]).toMatchObject({ params: {
+        modelSettings: { maxOutputTokens: thinking === 'off' ? 4096 : 32768, maxRetries: 0 },
+      } })
+    }
+  })
+
+  it('向 SDK 明确开启真实思考事件，避免活跃思考被前端 45 秒空闲计时误判', async () => {
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([
+      { type: 'reasoning-start', id: 'r1' },
+      { type: 'reasoning-delta', id: 'r1', delta: '正在核对规划' },
+      { type: 'reasoning-end', id: 'r1' },
+      { type: 'text-delta', delta: '核对完毕' },
+    ]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(mocks.handleChatStream.mock.calls[0]![0]).toMatchObject({ sendReasoning: true })
+    expect(forwarded.some(chunk => chunk.type === 'reasoning-delta')).toBe(true)
+    expect(persisted().content).toBe('核对完毕')
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'completed', undefined)
+  })
+
+  it('思考期间整轮到期会明确报超时，落失败终态并允许再次发送', async () => {
+    vi.stubEnv('AI_RUN_TIMEOUT_MS', '3000')
+    mocks.handleChatStream.mockResolvedValueOnce(pendingUpstream())
+    const invoke = await handler()
+    const response = await invoke({})
+    const received = drain(response)
+    await vi.advanceTimersByTimeAsync(3100)
+    const forwarded = await received
+    expect(forwarded).toContainEqual({ type: 'error', errorText: expect.stringContaining('超时') })
+    expect(persisted().content).toContain('超时')
+    expect(mocks.finishRun).toHaveBeenCalledWith(expect.anything(), 'failed', 'generation_failed')
+    await expect(drain(await invoke({}))).resolves.toHaveLength(2)
+  })
+
   it('尚未结束的流每两秒保存检查点，停止后只完成一次任务收尾', async () => {
     const upstream = pendingUpstream()
     upstream.reader.read.mockResolvedValueOnce({ value: { type: 'text-delta', delta: '途中已经生成的文字' }, done: false } as never)
@@ -239,11 +295,11 @@ describe('聊天 handler 的生命周期与规划锁', () => {
     mocks.handleChatStream.mockImplementationOnce(() => { started(); return initialization })
     const invoke = await handler()
     const request = invoke({})
-    const rejected = expect(request).rejects.toMatchObject({ statusCode: 502 })
+    const rejected = expect(request).rejects.toMatchObject({ statusCode: 504 })
     await startedPromise
     await vi.advanceTimersByTimeAsync(180000)
     await rejected
-    expect(persisted().content).toContain('本次生成未完成')
+    expect(persisted().content).toContain('超时')
     expect(mocks.set).toHaveBeenCalledTimes(1)
     const options = mocks.handleChatStream.mock.calls[0]![0] as { params: { abortSignal: AbortSignal } }
     expect(options.params.abortSignal.aborted).toBe(true)
@@ -318,6 +374,35 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     type: 'tool-input-available', toolCallId: 'known-call', toolName: 'patch_plan_json',
     input: { planId, patch: { summary: '本次变更' } },
   }
+
+  it.each([3, 4])('转发当前任务的合法草稿，包括后续工具已将检查点推进到修订%d的延迟输出', async revision => {
+    mocks.draftGet.mockReturnValue({ id: 9, planId, runId: 1, messageId: 102, status: 'active', revision, baseRevision: 1, version: 1 })
+    const output = { ok: true, version: 1, revision: 3, versionId: null, draftId: 9,
+      preview: { ...preview, version: 1, title: '真实草稿', draftId: 9, status: 'draft' } }
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([input, { type: 'tool-output-available', toolCallId: 'known-call', output }]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.find(chunk => chunk.type === 'tool-output-available')?.output).toEqual(output)
+    expect(mocks.finishRun).toHaveBeenCalledWith(1, 'completed', undefined)
+  })
+
+  it.each([
+    { planId: 999 }, { runId: 2 }, { messageId: 888 }, { status: 'recoverable' }, { revision: 2 }, { baseRevision: 3 }, { version: 7 },
+  ])('拒绝不属于当前工具检查点的草稿 %j', async changes => {
+    mocks.draftGet.mockReturnValue({ id: 9, planId, runId: 1, messageId: 102, status: 'active', revision: 3, baseRevision: 1, version: 1, ...changes })
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([input, { type: 'tool-output-available', toolCallId: 'known-call',
+      output: { ok: true, version: 1, revision: 3, versionId: null, draftId: 9, preview: { ...preview, version: 1, draftId: 9, status: 'draft' } } }]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.some(chunk => chunk.type === 'tool-output-error')).toBe(true)
+    expect(forwarded.some(chunk => chunk.type === 'tool-output-available')).toBe(false)
+  })
+
+  it('终态提交冲突时数据库与JSONL均为failed并保存恢复提示', async () => {
+    mocks.finishRun.mockReturnValue('failed')
+    await drain(await (await handler())({}))
+    const status = mocks.terminalStatus.mock.calls[0]![0] as () => string
+    expect(status()).toBe('failed')
+    expect(persisted().content).toContain('恢复草稿')
+  })
 
   it.each([
     ['未知 toolCallId', 'unknown-call', preview, 202, { id: 202, planId, version: 2 }],
