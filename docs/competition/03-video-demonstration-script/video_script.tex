@@ -1,0 +1,116 @@
+\documentclass[11pt,a4paper,UTF8]{ctexart}
+
+\usepackage[margin=2.3cm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{tcolorbox}
+
+\definecolor{inkred}{rgb}{0.67,0.20,0.15}
+\definecolor{bamboo}{rgb}{0.32,0.45,0.38}
+\definecolor{paper}{rgb}{0.98,0.98,0.96}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 2026年华北五省大学生计算机应用大赛 · 视频与答辩}
+\fancyhead[R]{\small 山海行笺 · 演示脚本与答辩预案}
+\fancyfoot[C]{\small 第 \thepage\ 页}
+\renewcommand{\headrulewidth}{0.6pt}
+
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE \bfseries \color{inkred} 山海行笺 · 5分钟演示视频分镜脚本与专家答辩预案}\\[0.4em]
+    {\large \textbf{面向垂直文旅场景的国风旅游行程规划智能体工作台}}\\[0.6em]
+    \small \textbf{赛道方向：} 方向一：大模型与智能体应用赛道 \quad | \quad \textbf{公网部署验证：} \url{http://64.83.12.37:3000}
+\end{center}
+
+\vspace{0.5em}
+
+\begin{tcolorbox}[colback=paper,colframe=black!25,title=\textbf{【大赛视频技术参数规范说明】}]
+\small
+\begin{itemize}
+    \item \textbf{时长限制}：严格限制在 5 分钟以内（本脚本规划精确时长为 \textbf{4 分 40 秒}，预留 20 秒弹性缓冲）；
+    \item \textbf{文件体积}：$\le 150\text{MB}$（推荐导出参数：1080P/60FPS，视频码率 3500 kbps，音频 AAC 128 kbps）；
+    \item \textbf{视频格式}：MP4 格式（采用 H.264 视频编码与 AAC 音频编码，保证大赛在线评审系统原生流畅解码）；
+    \item \textbf{录制方式}：OBS Studio 1080P 无损录屏 + 专业电容麦真人旁白配音。
+\end{itemize}
+\end{tcolorbox}
+
+\section*{一、5分钟程序演示视频秒级分镜录制脚本}
+
+\begin{longtable}{p{1.8cm}p{3.8cm}p{6.5cm}p{2.8cm}}
+\toprule
+\textbf{时间节点} & \textbf{画面与交互操作} & \textbf{标准配音解说词（严谨工科口吻）} & \textbf{评审得分考察点} \\
+\midrule
+\endhead
+
+00:00--00:35 & 
+浏览器打开公网 \texttt{64.83.12.37:3000}，展示宣纸质感登录界面，快速输入测试账号登录。 & 
+“各位评委老师好。通用大模型在文旅规划中常出现虚构坐标、覆写崩溃和图文脱节等痛点。为此，我们研发了‘山海行笺’国风智能体工作台。系统现已通过 Docker 全球公网部署。界面首创东方宣纸物理微点阵与无缝纤维噪点渲染，同时对实景照片实施全域图层隔离，保证画质纯净。” & 
+痛点切入精确\newline 宣纸美学创新\newline 公网联通合规 \\
+\midrule
+
+00:35--01:30 & 
+进入双栏工作区，下达自然语言指令：“五一想带家人去山西大同太原4天，偏好古建与面食，节奏舒缓”。展示服务端流式打字与预览卡片插入。 & 
+“左侧为工作区会话树，主区展开智能体流式对话。系统搭载国产开源基座大模型 DeepSeek，在 Mastra ReAct 编排引擎下驱动受控工具集，自动查询文旅知识库、排查日程与预算。AI 产出的不是不可解析的纯文本，而是在聊天流中直接嵌入可交互的可视化富媒体预览卡片。” & 
+国产大模型驱动\newline ReAct 多步编排\newline 实时预览卡片流 \\
+\midrule
+
+01:30--02:25 & 
+点击预览卡片“查看详情”，无缝切入“行程总览”与“舆图轨迹”。切换至第2天，点击景点查看时长、开销及百度服务端代理全景街景。 & 
+“主区在对话与规划编辑之间丝滑切换。我们基于 Zod StrictObject 构建强类型数据契约，未知字段自动拦截并提示纠正。在路线舆图中，系统统一由后端安全代理百度地图静态图服务绘制顺序轨迹，未知坐标强制留空，彻底终结了模型随意捏造经纬度的行业乱象。” & 
+Zod 严格数据契约\newline 百度受控地图代理\newline 杜绝地理坐标虚构 \\
+\midrule
+
+02:25--03:15 & 
+横向切换到“风物食记”与“行前清单”。点击“大同刀削面”标记为‘已尝’并打分；在出行清单勾选充电宝并新增条目。 & 
+“除了行程，系统原生内置‘风物食记’与‘出行清单’。食记通过腾讯云 WIMGS 多模态文搜图调取权威实景影像，避免 AI 生成虚假菜品图；清单支持状态原子切换与唯一 ID 追踪。全界面无任何 JSON 源码暴露，全部通过现代化人机协同表单完成结构化编辑。” & 
+风物食记与清单\newline 腾讯云实景搜图\newline 纯可视化表单协同 \\
+\midrule
+
+03:15--04:05 & 
+在对话框输入“将第三天下午的景点换成晋祠”，展示 AI 输出增量 Patch。随后点击“版本路线图”，展示 v1 到 v2 的时光轴树，演示 Diff 对比并执行 Undo 回滚。 & 
+“这是系统最具技术壁垒的创新点：AI 仅下发原子操作指令 apply\_plan\_edits，杜绝全量覆盖风险。系统解耦版本号与修订号，采用单调递增 Revision 乐观锁控制。在时光轴路线图中，可精准查看字段级 Diff 对比。一键 Undo 回退历史快照，无需新建冗余版本，版本指针安全复位并在新节点无缝分叉。” & 
+原子增量编辑算法\newline Revision 乐观锁\newline 时光轴版本 Undo \\
+\midrule
+
+04:05--04:40 & 
+切出命令行终端，展示 \texttt{bun run test}（291项单测全绿）与 Docker 容器状态，最后展示移动端自适应抽屉效果。 & 
+“在工程质量上，系统基于 Nuxt 4 与原生 Bun 单体构建，通过严格的 36 套件、291 项自动化单元测试。针对移动端实现了自适应抽屉与离线草稿恢复。山海行笺实现了前沿智能体工程与东方文旅美学的深度交融。汇报完毕，感谢各位评委老师！” & 
+291项单测覆盖\newline Docker 容器化\newline 移动端适配闭环 \\
+\bottomrule
+\end{longtable}
+
+\vspace{0.8em}
+\section*{二、现场专家答辩关键技术问题预案（Q\&A）}
+
+\begin{tcolorbox}[colback=white,colframe=bamboo!70,title=\textbf{Q1：为什么不让大语言模型直接输出修改后的完整 JSON，而要设计复杂的 apply\_plan\_edits 原子操作？}]
+\small
+\textbf{标准回答}：\newline
+大语言模型具有随机性。如果允许模型全量覆盖（Overwrite）包含几十个字段的完整旅行 JSON，在单轮编辑中模型极易因注意力衰减而“丢失”此前用户精心配置的住宿预算或食记评分。我们的 \texttt{apply\_plan\_edits} 借鉴了现代数据库 WAL（Write-Ahead Logging）思想，AI 仅扮演“增量指令派发者”，服务端事务引擎负责安全回填，任一指令非法全量回滚，在软件工程底层彻底消除了状态损坏风险。
+\end{tcolorbox}
+
+\vspace{0.6em}
+
+\begin{tcolorbox}[colback=white,colframe=bamboo!70,title=\textbf{Q2：多用户并发或快速连续点击时，系统的版本时光轴如何避免脏写与数据丢失？}]
+\small
+\textbf{标准回答}：\newline
+我们通过“版本号（Version）”与“修订号（Revision）”的双标量解耦设计解决了这一难题。Version 代表业务快照，而 Revision 是强单调递增标量。客户端请求携带期望修订号（CAS 机制），服务端在单一 SQLite 写入者事务内比对。发生冲突时直接返回 HTTP 409，客户端完好保留本地草稿池，引导用户比对最新状态，既支持非破坏性的版本 Undo，又从并发理论上杜绝了脏写。
+\end{tcolorbox}
+
+\vspace{0.6em}
+
+\begin{tcolorbox}[colback=white,colframe=bamboo!70,title=\textbf{Q3：大模型经常捏造不存在的景点和虚假经纬度，你们的系统是如何在算法层面约束的？}]
+\small
+\textbf{标准回答}：\newline
+我们在 Zod 契约层增加了强校验规则：经度与纬度必须同时存在或同时为 \texttt{null}；未获取权威反向地理编码的数据强制标记为“待定位”，模型不允许填入任何猜测值。同时，所有地图渲染均通过后端安全代理百度地图标准静态 API，且连线仅作为访问时序的拓扑连线，不伪造道路导航里程，确保测绘数据的合规与严谨。
+\end{tcolorbox}
+
+\end{document}

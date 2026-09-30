@@ -22,7 +22,12 @@ body {
   font-family: var(--font-body);
   font-size: 14px;
   color: var(--ink);
-  background: var(--paper);
+  background-color: var(--paper);
+  background-image: var(--paper-texture-ambient), var(--paper-texture-dot), var(--paper-texture-fiber);
+  background-size: 100% 720px, 4px 4px, 256px 256px;
+  background-repeat: no-repeat, repeat, repeat;
+  background-position: bottom center, top left, top left;
+  background-attachment: fixed, fixed, fixed;
   -webkit-font-smoothing: antialiased;
   transition: background-color $dur-base $ease-soft, color $dur-base $ease-soft;
 }
@@ -392,6 +397,61 @@ input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+// 国风宣纸肌理应用类与核心纸张容器（微点阵 + 纤维噪点）
+.paper-surface,
+.workspace-sidebar,
+.conv,
+.plan-view,
+.day-card,
+.preview-card,
+.food-journal__card,
+.food-journal__editor,
+.travel-checklist,
+.roadmap__detail,
+.roadmap__canvas,
+.login__card,
+.settings-view__card,
+.settings-modal__body,
+.confirm-modal__dialog {
+  background-image: var(--paper-texture-dot), var(--paper-texture-fiber);
+  background-size: 4px 4px, 256px 256px;
+  background-repeat: repeat, repeat;
+}
+
+// 图像与多媒体防护：确保照片、街景、地图、轮播与图标保持原始画质，不应用任何纸张噪点或滤镜
+img,
+picture,
+video,
+canvas,
+svg.brand-mark,
+.brand-mark,
+.cached-image,
+.cached-image-frame,
+.cached-image img,
+.login__carousel,
+.login__carousel-slide,
+.login__backdrop,
+.login__backdrop-image,
+.map-view__frame,
+.map-view__canvas,
+.city-map__frame,
+.panorama-view,
+.panorama-viewport,
+.resource-image img,
+[data-no-paper] {
+  filter: none !important;
+  isolation: isolate;
+}
+
+img,
+picture,
+video,
+canvas,
+.cached-image img,
+.resource-image img {
+  background-image: none !important;
+}
 
 @media (max-width: 640px) { .panel { padding: 18px; } }
 @media (prefers-reduced-motion: reduce) {

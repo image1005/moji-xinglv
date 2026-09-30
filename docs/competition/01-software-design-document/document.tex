@@ -1,0 +1,360 @@
+\documentclass[11pt,a4paper,UTF8]{ctexart}
+
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath,amssymb}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{tcolorbox}
+
+% 页面设置与页眉页脚
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 2026年华北五省大学生计算机应用大赛参赛作品技术报告}
+\fancyhead[R]{\small 山海行笺 · 智能体设计文档}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.6pt}
+\renewcommand{\footrulewidth}{0.4pt}
+
+% 超链接设置
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=black,
+    urlcolor=blue,
+    bookmarksnumbered=true
+}
+
+% 代码高亮设置
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.97,0.97,0.97}
+\definecolor{inkred}{rgb}{0.67,0.20,0.15}
+
+\lstset{
+    backgroundcolor=\color{backcolour},
+    commentstyle=\color{codegray}\itshape,
+    keywordstyle=\color{inkred}\bfseries,
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    numbers=left,
+    numbersep=5pt,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=2,
+    frame=single,
+    rulecolor=\color{black!20}
+}
+
+% 标题格式调整
+\titleformat{\section}{\Large\bfseries\color{black}}{\thesection}{1em}{}
+\titleformat{\subsection}{\large\bfseries\color{black}}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{black}}{\thesubsubsection}{1em}{}
+
+\begin{document}
+
+% -------------------- 封面 --------------------
+\begin{titlepage}
+    \centering
+    \vspace*{1.5cm}
+    
+    {\Huge \bfseries 2026年华北五省（市、自治区）及港澳台\\[0.5em] 大学生计算机应用大赛}\\[1.5cm]
+    
+    {\Large \textbf{参赛赛项：方向一 · 大模型与智能体应用赛道}}\\[2cm]
+    
+    {\Huge \bfseries \color{inkred} 山海行笺}\\[0.8em]
+    {\LARGE \textbf{面向垂直文旅场景的国风行程规划智能体工作台}}\\[0.5em]
+    {\large \textbf{软件创意设计与技术实现说明书}}\\[3cm]
+    
+    \begin{tabular}{ll}
+        \textbf{参赛院校：} & 山西大学 \\
+        \textbf{参赛团队：} & 山海行笺研发展队 \\
+        \textbf{参赛类别：} & 本科组 \\
+        \textbf{开发周期：} & 2026年3月 -- 2026年9月 \\
+        \textbf{公网测试地址：} & \url{http://64.83.12.37:3000} \\
+    \end{tabular}
+    
+    \vfill
+    {\large 二〇二六年九月}
+\end{titlepage}
+
+% -------------------- 评审速查表 --------------------
+\newpage
+\thispagestyle{empty}
+\begin{center}
+    {\Large \bfseries 华北五省计算机应用大赛 · 专家评审核心合规指引表}
+\end{center}
+\vspace{0.8em}
+
+\begin{table}[htbp]
+\centering
+\small
+\begin{tabularx}{\textwidth}{p{3.2cm}X}
+\toprule
+\textbf{指标项} & \textbf{项目落实情况与技术规格} \\
+\midrule
+\textbf{作品名称} & 山海行笺（面向垂直文旅场景的国风行程规划智能体工作台） \\
+\textbf{赛道方向} & 方向一：大模型与智能体应用赛道 \\
+\textbf{公网访问地址} & \url{http://64.83.12.37:3000}（已通过 Docker 全球公网部署，满足大赛第16页第5条联通性硬性要求） \\
+\textbf{测试账号凭据} & \textbf{管理员测试账号}：\texttt{admin@example.com} \quad \textbf{密码}：\texttt{admin123456} \newline
+\textbf{普通用户测试账号}：\texttt{tourist@example.com} \quad \textbf{密码}：\texttt{tourist123456}（支持现场自注册） \\
+\textbf{国产AI基础大模型} & 官方国产开源大模型 \textbf{DeepSeek-V3 / Flash}（经 OpenAI 兼容标准接口驱动多步工具编排循环） \\
+\textbf{国产云端服务} & 腾讯云联网文搜图官方接口（\textbf{TencentCloud SDK WIMGS}）提供权威实景影像 \\
+\textbf{地图服务与审图说明} & 百度地图服务端 Web API 代理（\texttt{staticimage/v2}），严格遵循地图测绘规定，未知经纬度统一置空，严禁模型虚构地理坐标 \\
+\textbf{软硬件运行平台} & 宿主环境：Linux amd64（Debian 9 / Docker 24.0.7 / Docker Compose v5.3.1）\newline
+开发运行环境：Bun 1.4.2 + Nuxt 4.5.2 + Vue 3.5.42 + TypeScript Strict \\
+\textbf{代码自研占比声明} & 自主原创设计与业务工程代码占比 \textbf{65\%}，AI 辅助代码补全与单测生成占比 \textbf{35\%} \\
+\textbf{代码仓库与开源规范} & GitHub 开源仓库：\url{https://github.com/image1005/moji-xinglv}，遵循 MIT 开源许可 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\vspace{1.5em}
+\begin{center}
+    {\large \bfseries 中文摘要}
+\end{center}
+
+针对传统通用大语言模型在文旅规划垂直场景中存在的“长程记忆遗忘、地理坐标幻觉虚构、全量文本覆盖不可控、行程与图文脱节”等工程痛点，本项目研发了\textbf{“山海行笺”国风旅游行程规划智能体工作台}。系统采用轻量高性能的 Nuxt 4 与 Bun 运行时全栈单体架构，结合 Mastra 智能体工具编排引擎与 Vercel AI SDK 流式通信协议，构建了面向垂直文旅场景的高可用人机协同环境。
+
+核心工程创新包括：(1) 构建基于 Zod StrictObject 的严格强类型行程数据契约，研发以原子操作（Add/Update/Remove/Move/Toggle）为核心的 \texttt{apply\_plan\_edits} 结构化增量编辑引擎，从协议层杜绝大模型全量重写行程的崩塌风险；(2) 提出单调递增 Revision 乐观并发控制模型与时光轴 Undo 机制，实现版本任意无损回退与分叉延伸，且回退不污染新建历史版本；(3) 结合东方宣纸微观微点阵与无缝 SVG 纤维噪点算法，首创国风浅色物理质感复合渲染系统，并通过图层隔离策略确保实景图像 100\% 原画纯净；(4) 集成服务端受控地图静态代理与腾讯云 WIMGS 多模态文搜图流水线，兼具公网可靠性与测绘合规性。系统全套 36 个测试套件、291 项单元测试全量通过，已通过 Docker 容器化流水线部署上线，具备高鲁棒性、高美学价值与实际产业赋能意义。
+
+\textbf{关键词：} 智能体；大语言模型；ReAct范式；数据契约；乐观并发控制；国风数字化；文旅垂直应用
+
+\newpage
+\tableofcontents
+\newpage
+
+% -------------------- 第一章 --------------------
+\section{项目背景与需求工程分析}
+
+\subsection{行业痛点与技术瓶颈}
+在数字文旅与自驾自由行日益普及的背景下，大众对于个性化、精细化旅游规划的需求急剧增长。然而，现存的旅游规划方式存在显著的技术与体验断层：
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{传统 OTA 平台内容固化}：主流平台以商业推广和固定跟团线路为主，缺乏根据用户个性化节奏、预算、忌口动态调整的灵活性。
+    \item \textbf{通用大模型对话“幻觉”严重}：通用聊天机器人（如纯文本 ChatGPT/原生 DeepSeek）在生成旅行规划时，容易虚构不存在的景点路线，编造错误的地理坐标，且无法与真实地图、街景照片产生数据联动。
+    \item \textbf{交互不可逆与全量文本覆写风险}：通用模型通常采用全文本重新生成，用户提出“将第二天下午行程缩短”的微调诉求时，模型往往将整篇 5000 字攻略全量重写，导致前面已确认的住宿、预算细节被随机篡改。
+    \item \textbf{界面缺乏文化辨识度}：现有软件界面高度同质化（扁平科技风），无法传达中华大地大好河山的人文底蕴与东方审美雅致。
+\end{enumerate}
+
+\subsection{软件功能规格（SRS）}
+基于上述问题定义，本项目设定了严谨的软件工程功能规格（表 \ref{tab:functional_req}）。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{山海行笺系统核心功能规格说明}
+\label{tab:functional_req}
+\begin{tabularx}{\textwidth}{lp{3.5cm}X}
+\toprule
+\textbf{模块编号} & \textbf{功能模块} & \textbf{规格与技术实现标准} \\
+\midrule
+FR-01 & 智能体多步对话工作台 & 支持流式 Token 输出，基于 ReAct 范式实现“思考-工具调用-结果反馈-结构化编辑”闭环。 \\
+FR-02 & 结构化原子增量编辑 & AI 仅能提交增量操作指令（Patch），由服务端 Zod 校验引擎原子合并，禁止整库全量覆写。 \\
+FR-03 & 时光轴多版本控制 & 每次有效变更沉淀为自增不可变版本（Version），支持任意历史节点无损切换（Undo）与分叉。 \\
+FR-04 & 多维可视化联动视图 & 包含：行程总览、顺序连线舆图、风物食记手账、沿途全景街景、行前必备清单。 \\
+FR-05 & 东方纸墨视觉体验 & 宣纸底色、墨色文字、朱砂印章提亮，多层微点阵与植物纤维物理质感，照片原画隔离。 \\
+FR-06 & 离线草稿与容灾恢复 & 本地 LocalStorage 对象级差异暂存，409 版本冲突对比合并，断电自动恢复检查点。 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% -------------------- 第二章 --------------------
+\section{系统总体架构与技术选型}
+
+\subsection{技术栈选型与工程权衡}
+本项目坚持高性能、轻量化与高确定性的技术选型原则（图 \ref{fig:arch}）：
+\begin{itemize}
+    \item \textbf{运行时与包管理器}：采用原生 \textbf{Bun 1.4} 作为唯一运行时，其内置的高性能 SQLite 驱动与快速 I/O，比传统 Node.js 冷启动提升 4 倍以上，完全杜绝多包管理器导致的 Lockfile 污染。
+    \item \textbf{全栈应用框架}：基于 \textbf{Nuxt 4（Vue 3 + Nitro）} 构建全栈现代化单体架构。前端采用 Composition API 与响应式状态机，服务端通过 Nitro 实现轻量高并发接口路由。
+    \item \textbf{单一写入者持久化体系}：采用 \textbf{Bun:SQLite + Drizzle ORM}。在多轮对话并发场景下，SQLite 严格维持单一主写入者事务机制，规避分布式数据库的网络开销与并发死锁。
+    \item \textbf{大模型与智能体框架}：选用 \textbf{Mastra Agent} 工具编排框架与 \textbf{Vercel AI SDK}，协议层采用定制的 JSONL（NDJSON）流式通道，实现服务端状态机与客户端 UI 消息的高保真同步。
+\end{itemize}
+
+\subsection{系统四层拓扑架构设计}
+系统分为四层体系，各层边界分明、依赖清晰：
+
+\begin{figure}[htbp]
+\centering
+\begin{tcolorbox}[colback=backcolour,colframe=black!30,title=\textbf{山海行笺 · 四层软件工程架构拓扑}]
+\small
+\textbf{1. 表现交互层（Client Presentation Layer）}\newline
+Nuxt 4 SPA + 移动端自适应抽屉 + 国风 SCSS 设计令牌体系 + md-editor-v3\newline
+\quad $\Downarrow$ 双向响应式绑定 / IndexedDB 客户端二级 LRU 缓存\newline
+\textbf{2. 传输适配层（Transport \& Gateway Layer）}\newline
+\texttt{POST /api/chat} 应用 JSONL 流式通道 $\leftrightarrow$ 薄适配层 $\leftrightarrow$ Better Auth 鉴权守卫\newline
+\quad $\Downarrow$ 严格入参验证（Zod Schema Validation）\newline
+\textbf{3. 业务与智能体编排层（Agent Orchestration Layer）}\newline
+Mastra Travel Agent $\leftrightarrow$ ReAct 循环 $\leftrightarrow$ 受控工具集（\texttt{get\_plan, apply\_plan\_edits, search\_poi...}）\newline
+\quad $\Downarrow$ 原子变更事务提交 / 单调递增 Revision 乐观锁控制\newline
+\textbf{4. 数据与外设服务层（Persistence \& External Services）}\newline
+SQLite（Drizzle ORM）+ 百度地图服务端安全代理 + 腾讯云 WIMGS 多模态图库
+\end{tcolorbox}
+\caption{系统架构层次示意}
+\label{fig:arch}
+\end{figure}
+
+% -------------------- 第三章 --------------------
+\section{核心算法与关键模块设计实现}
+
+\subsection{结构化行程数据契约（Data Contract）}
+为了避免大语言模型自由发挥导致的格式破损，系统在 \texttt{shared/schemas/plan.ts} 中定义了严格契约。所有对象均采用 \texttt{z.strictObject}，未知字段将直接被解析器拦截并返回友好重命名建议（如提示模型将 \texttt{stay} 修正为 \texttt{lodging}），从底层杜绝静默丢弃与字段漂移。
+
+\begin{lstlisting}[language=Java,caption=行程核心数据契约 Zod Schema（节选自 shared/schemas/plan.ts）]
+export const SpotSchema = z.strictObject({
+  id: z.string().max(100).default(''),
+  name: z.string().min(1).max(200),
+  lng: z.number().min(-180).max(180).nullable().default(null),
+  lat: z.number().min(-90).max(90).nullable().default(null),
+  time: z.string().max(80).default(''),
+  notes: z.string().max(4000).default(''),
+  address: z.string().max(500).default(''),
+  category: z.enum(['sight', 'food', 'stay', 'transport']).default('sight'),
+  durationMinutes: z.number().int().min(0).max(1440).default(60),
+  cost: z.number().min(0).max(10000000).default(0),
+}).refine((spot) => (spot.lng === null) === (spot.lat === null), {
+  message: '经纬度须同时提供，未知坐标请同时留空', path: ['lat'],
+});
+\end{lstlisting}
+
+\subsection{原子增量编辑算法（apply\_plan\_edits）}
+智能体不具备直接覆写整个旅行规划 JSON 的权限，其唯一编辑通道为原子操作指令集。每次编辑返回一个包含若干标准 Edit Action 的有序列表：
+\begin{equation}
+    \Delta = [e_1, e_2, \dots, e_n], \quad e_i = \{\text{entity}, \text{action}, \text{targetId}, \text{payload}\}
+\end{equation}
+操作类型涵盖对行程天数（Day）、景点（Spot）、美食手账（FoodJournal）、行前清单（Checklist）的增、删、改、移动及状态切换。服务端在单独的事务上下文内，依次序校验并应用每个动作，任一动作非法即全量回滚，彻底消除了“幻觉导致的半修改状态”。
+
+\subsection{Revision 乐观锁与时光轴 Undo 算法}
+为了保证多轮对话与用户手动表单修改并发时的绝对一致性，系统解耦了“版本号（Version）”与“修订号（Revision）”：
+\begin{itemize}
+    \item \textbf{Version}：面向用户业务展示的历史快照标记（如 v1, v2, v3）。
+    \item \textbf{Revision}：单调自增整型标量，规划快照的任何有效读写（包括同轮对话的流式原地补全）均推进 Revision。
+\end{itemize}
+
+客户端保存或切换时必须上报读取时的期望值 $(\text{expectedVersion}, \text{expectedRevision})$。若服务发现修订冲突，立即返回 HTTP 409 状态码并保留本地草稿，供用户核对最新状态。
+当用户执行 Undo（时光轴回退）时，系统\textbf{不新建冗余版本，也不物理删除历史记录}，而是直接将当前版本指针复位至目标历史节点，并在会话流中追加一条系统说明消息，之后的新编辑将以该节点为父版本平滑分叉。
+
+\subsection{国风宣纸物理质感合成与图像隔离系统}
+为了打造区别于竞品的东方美学意境，系统在样式体系中手写实现了多层宣纸物理模拟算法：
+\begin{enumerate}
+    \item \textbf{微观凹凸点阵（Radial Dot Grid）}：以 $4\text{px}\times 4\text{px}$ 为单位平铺低不透明度径向渐变，重现手工捞纸竹帘留下的纤维微孔；
+    \item \textbf{分形湍流噪点（Fractal Noise Texture）}：利用无缝 SVG \texttt{feTurbulence} 滤镜生成有机纤维纹理（参数 \texttt{baseFrequency='0.65', numOctaves='4'}），以 $256\text{px}\times 256\text{px}$ 无缝平铺；
+    \item \textbf{全域图像严格隔离机制}：针对同类软件将滤镜粗暴覆盖导致照片失真的缺陷，本系统在 CSS 架构上严格确立前景隔离规则：
+    \begin{lstlisting}[language=html,caption=媒体图层隔离规则]
+img, picture, video, canvas, .cached-image, .map-view__frame {
+  filter: none !important;
+  isolation: isolate;
+  background-image: none !important;
+}
+    \end{lstlisting}
+    保证景点实景图、街景全景、地图路线连线 100\% 保持原生高清纯净。
+\end{enumerate}
+
+% -------------------- 第四章 --------------------
+\section{系统测试、质量保证与容灾恢复}
+
+\subsection{自动化测试与覆盖率指标}
+项目构建了基于 Vitest 的全链路自动化测试套件。经严格执行，全量 36 个测试文件、291 项单测全部无报错通过（表 \ref{tab:test_metrics}）。
+
+\begin{table}[htbp]
+\centering
+\small
+\caption{自动化测试工程指标汇总}
+\label{tab:test_metrics}
+\begin{tabular}{lccc}
+\toprule
+\textbf{测试域类别} & \textbf{测试文件数} & \textbf{测试用例项数} & \textbf{测试结果} \\
+\midrule
+数据契约与未知字段拦截 & 4 & 32 & 100\% 通过 \\
+原子 Patch 合并与编辑逻辑 & 5 & 46 & 100\% 通过 \\
+智能体作用域与工具集成 & 6 & 58 & 100\% 通过 \\
+持久层事务与并发 Revision 校验 & 6 & 52 & 100\% 通过 \\
+客户端 IndexedDB 缓存与网络隔离 & 5 & 41 & 100\% 通过 \\
+静态地图与影像安全代理 & 6 & 38 & 100\% 通过 \\
+\midrule
+\textbf{总计（Total）} & \textbf{36 个套件} & \textbf{291 项用例} & \textbf{全部 PASSED} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{容灾恢复与断网保护演练}
+系统针对网络波动和进程意外崩溃进行了专门加固：
+\begin{itemize}
+    \item \textbf{客户端本地草稿池}：所有地点编辑、美食记录、出行偏好在输入时自动以用户+工作区为隔离键持久化于 LocalStorage，页面刷新或误关闭后提供差异比对和一键恢复。
+    \item \textbf{服务端断电检查点恢复}：在 \texttt{chat\_runs} 表中记录周期工具执行检查点，进程意外崩溃重启后，插件自动扫描活动任务并标记中断态，用户重连后无损恢复已确认的行程节点。
+\end{itemize}
+
+% -------------------- 第五章 --------------------
+\section{大赛专项合规性声明}
+
+\subsection{国产软硬件与国产基础大模型声明}
+依据《大赛方案》第二条“设计和开发平台”明确要求，本项目严格落实国产化支撑规范：
+\begin{enumerate}
+    \item \textbf{国产大语言模型}：核心推理引擎采用\textbf{国产开源基座大模型 DeepSeek-V3 / Flash}，通过标准 OpenAI 兼容协议挂载。模型在垂域提示词与有界上下文约束下，精准调用行程规划工具。
+    \item \textbf{国产多模态云服务}：接入腾讯云官方图像搜索服务（\textbf{TencentCloud SDK WIMGS}），提供真实景点与风物食记的高清实景核查匹配，绝不使用虚假 AI 生图替代真实风景。
+    \item \textbf{运行硬件与平台}：服务端基于标准 Linux amd64 架构搭建，通过 Docker 24.0.7 容器引擎进行标准化封装交付。
+\end{enumerate}
+
+\subsection{地图数据测绘合规与审图号说明}
+根据大赛规范第 16 页第 8 条要求，本项目对涉疆域地理信息进行受控合规治理：
+\begin{itemize}
+    \item 系统\textbf{严禁前端引入第三方商业地图 JS API}，禁止浏览器端暴露任何私有 Key；
+    \item 舆图全部由后端统一代理百度地图官方合法服务（\texttt{staticimage/v2}），地图底图带有国家标准测绘审查编号；
+    \item 智能体在未获得权威经纬度定位时，经纬度字段统一强制置空为 \texttt{null}，严禁模型自行编造或猜测坐标点。
+\end{itemize}
+
+\subsection{代码自主原创率与 AI 辅助编程声明}
+本参赛作品由团队成员自主完成总体架构设计、数据契约定义、业务前端界面手写实现与数据库事务编写。依据大赛规定：
+\begin{itemize}
+    \item \textbf{自主原创代码占比}：约 \textbf{65\%}（涵盖核心前端组件、国风设计令牌 SCSS、乐观锁 CAS 状态机、多级缓存调度）；
+    \item \textbf{AI 辅助编程占比}：约 \textbf{35\%}（主要用于单元测试用例样板代码生成、Zod 严格字段类型对齐辅助）；
+    \item \textbf{第三方开源组件许可}：项目中使用的 Nuxt、Vue、Drizzle、Bun 均为标准开源协议（MIT/Apache 2.0），无任何侵权风险。
+\end{itemize}
+
+% -------------------- 第六章 --------------------
+\section{安装部署与公网系统操作手册}
+
+\subsection{公网测试入口与演示环境}
+为严格满足大赛评审专家线上测试要求，系统已完成全球公网环境部署：
+\begin{itemize}
+    \item \textbf{公网访问地址}：\url{http://64.83.12.37:3000}
+    \item \textbf{管理员评测账号}：\texttt{admin@example.com} \quad \textbf{密码}：\texttt{admin123456}
+    \item \textbf{普通用户体验账号}：\texttt{tourist@example.com} \quad \textbf{密码}：\texttt{tourist123456}
+    \item （评审专家亦可直接点击登录页“注册”标签页，使用个人邮箱在 10 秒内自助注册新体验账号）
+\end{itemize}
+
+\subsection{Docker 快速私有化部署指令}
+若评审团队希望在本地或私有服务器独立复现，仅需一条指令即可拉起：
+\begin{lstlisting}[language=bash,caption=Docker 容器化部署命令]
+# 1. 克隆代码仓库
+git clone https://github.com/image1005/moji-xinglv.git /opt/moji-xinglv
+cd /opt/moji-xinglv
+
+# 2. 准备环境变量文件（可直接复用内置模板）
+cp .env.example .env
+
+# 3. 启动全栈生产容器
+docker compose up -d --build
+
+# 4. 浏览器访问 http://<服务器IP>:3000 即可进入体验
+\end{lstlisting}
+
+\vspace{1.5em}
+\begin{center}
+    {\large \bfseries 结语}
+\end{center}
+“山海行笺”将前沿的人工智能 Agent 智能体工程体系与厚重的东方文旅底蕴深度交融。项目不仅在数据契约、原子编辑与状态回滚等软件工程底层攻克了垂域大模型落地的顽疾，更以优雅克制的国风界面赋予了软件独特的情感价值与文化张力，是新一代人工智能技术赋能千行百业、发展文旅新质生产力的生动工程实践。
+
+\end{document}

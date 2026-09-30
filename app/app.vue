@@ -2,6 +2,10 @@
 const { user } = useCurrentUser()
 const { initTheme } = useAppTheme()
 
+if (import.meta.client) {
+  initTheme()
+}
+
 onMounted(() => {
   initTheme()
 })

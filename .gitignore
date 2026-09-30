@@ -42,4 +42,11 @@ playwright-report/
 Thumbs.db
 Desktop.ini
 
+# 外部导入项目与资源归档
+sxu_cnta/
+sxu_cnta.tar
+ps.tar
+ps/
+
 # 注意：bun.lock 必须提交（可复现安装），不要加入忽略
+

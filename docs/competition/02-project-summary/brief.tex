@@ -1,0 +1,88 @@
+\documentclass[11pt,a4paper,UTF8]{ctexart}
+
+\usepackage[margin=2.2cm]{geometry}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{fancyhdr}
+\usepackage{hyperref}
+\usepackage{tcolorbox}
+
+\definecolor{inkred}{rgb}{0.67,0.20,0.15}
+\definecolor{bamboo}{rgb}{0.32,0.45,0.38}
+\definecolor{paper}{rgb}{0.98,0.98,0.96}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small 2026年华北五省大学生计算机应用大赛 · 作品简介}
+\fancyhead[R]{\small 山海行笺}
+\fancyfoot[C]{\small 第 \thepage\ 页}
+\renewcommand{\headrulewidth}{0.6pt}
+
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue}
+
+\begin{document}
+
+\begin{center}
+    {\LARGE \bfseries \color{inkred} 山海行笺 · 作品简介}\\[0.4em]
+    {\large \textbf{面向垂直文旅场景的国风旅游行程规划智能体工作台}}\\[0.6em]
+    \small \textbf{参赛赛道：} 方向一：大模型与智能体应用赛道 \quad | \quad \textbf{参赛高校：} 山西大学
+\end{center}
+
+\vspace{0.5em}
+
+% -------------------- 基本信息卡片 --------------------
+\begin{tcolorbox}[colback=paper,colframe=black!25,title=\textbf{【大赛核心速查信息】}]
+\small
+\begin{tabularx}{\textwidth}{p{3cm}X}
+\textbf{公网部署系统：} & \url{http://64.83.12.37:3000}（全球公网直连，已通过 Docker 容器化运行） \\
+\textbf{评审测试账号：} & \textbf{管理员}：\texttt{admin@example.com} / \texttt{admin123456} \quad
+\textbf{测试用户}：\texttt{tourist@example.com} / \texttt{tourist123456} \\
+\textbf{国产基础大模型：} & 官方国产开源大模型 \textbf{DeepSeek-V3 / Flash}（经标准 OpenAI 兼容协议挂载） \\
+\textbf{多模态云服务：} & 腾讯云官方图像搜索服务（\textbf{TencentCloud SDK WIMGS}） \\
+\textbf{开源代码仓库：} & \url{https://github.com/image1005/moji-xinglv}（遵循 MIT 开源协议） \\
+\end{tabularx}
+\end{tcolorbox}
+
+\vspace{0.8em}
+\section*{一、作品文字简介（严格符合大赛 $\le$ 800 字规范）}
+
+\textbf{“山海行笺”}是一款专为垂直文旅场景深度定制的国风旅游行程规划智能体工作台。针对传统通用大语言模型在旅行规划中频繁出现的“长程上下文遗忘、地理坐标虚构、全量覆写破坏已有成果、图文信息割裂”等工业级痛点，本项目创新性地提出“协议强契约 + 原子增量编辑 + 状态时光轴”三位一体的软件工程治理方案。
+
+系统技术架构基于高性能的 \textbf{Nuxt 4 + Bun 1.4} 全栈单体体系，在 Nitro 服务端调度 Mastra 智能体编排引擎，配合轻量化的 JSONL 双向通信管道与客户端 \texttt{@ai-sdk/vue} 实现流式多步交互。核心创新点包括：
+\begin{enumerate}
+    \item \textbf{原子增量编辑引擎（apply\_plan\_edits）}：建立基于 Zod StrictObject 的强类型行程契约，AI 仅向服务端下发规范化的增量 Patch 动作，彻底杜绝大模型全量覆盖导致的崩盘与幻觉；
+    \item \textbf{单调递增 Revision 乐观锁与时光轴 Undo}：通过独立的 Revision 标量控制并发事务冲突（409 CAS 检查），Undo 操作只移动历史版本指针而不新建冗余节点，支持版本多分支安全分叉；
+    \item \textbf{国风宣纸物理肌理复合渲染系统}：在 CSS 层面通过无缝 SVG 纤维噪点与帘纹点阵模拟传统宣纸微观触感，并对全域多媒体实景图像实施隔离保护，保持照片与地图 100\% 原画纯净；
+    \item \textbf{多模态与测绘合规体系}：融合腾讯云 WIMGS 实景图库检索与百度地图服务端受控静态图代理，未知坐标严格留空，杜绝坐标虚构。
+\end{enumerate}
+
+全系统覆盖 36 个测试套件、291 项自动化单元测试，支持离线草稿自动暂存比对与断电崩溃恢复，以优雅克制的东方国风美学赋能文旅新质生产力。
+
+\vspace{0.8em}
+\section*{二、核心功能架构与 3 幅展示截图规范}
+
+本作品按照大赛《方案》第 17 页要求，精选 3 幅最具代表性的核心功能设计架构作为提报截图（附件中单张图片均严格控制在 1MB 以内）：
+
+\vspace{0.5em}
+
+\begin{tcolorbox}[colback=white,colframe=bamboo!60,title=\textbf{展示图 1：智能体双栏沉浸式工作台与流式 ReAct 多步规划}]
+\small
+\textbf{设计说明}：展示左栏可折叠工作区会话树与主区智能体对话的协同交互。用户下达自然语言指令后，Mastra 智能体在服务端完成多步工具调用（读取偏好、检索景点、排查日程），流式生成结构化行程，并在会话流中实时输出可视化富媒体预览卡片。
+\end{tcolorbox}
+
+\vspace{0.5em}
+
+\begin{tcolorbox}[colback=white,colframe=bamboo!60,title=\textbf{展示图 2：多维规划预览视图（行程舆图、风物食记与行前清单）}]
+\small
+\textbf{设计说明}：展示系统在无源码暴露前提下的纯可视化编辑体验。包含按日划分的景点与用时开销卡片、百度受控代理静态路线顺序连线、支持状态切换的“风物食记手账”以及带本地唯一标识的“行前准备清单”，各视图双向响应联动。
+\end{tcolorbox}
+
+\vspace{0.5em}
+
+\begin{tcolorbox}[colback=white,colframe=bamboo!60,title=\textbf{展示图 3：版本时光轴路线图（Version Roadmap）与原子 Undo 回滚}]
+\small
+\textbf{设计说明}：展示单调递增 Revision 支撑下的历史版本时光轴树状图。用户可随时查看任意两版本间的字段级结构化 Diff 对比，执行一键时光倒流（Undo），并在原版本基础上分叉演进，清晰呈现人机协同编辑的历史脉络。
+\end{tcolorbox}
+
+\end{document}

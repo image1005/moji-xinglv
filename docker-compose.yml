@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    image: moji-xinglv:latest
+    container_name: moji-xinglv
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DATABASE_URL=file:/app/data/app.db
+      - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://64.83.12.37:3000}
+      - AUTH_SECRET=${AUTH_SECRET:-dev-local-secret-0123456789abcdef0123456789abcdef}
+      - AI_API_KEY=${AI_API_KEY:-}
+      - AI_BASE_URL=${AI_BASE_URL:-https://api.deepseek.com/v1}
+      - AI_MODEL=${AI_MODEL:-deepseek-flash}
+      - BAIDU_MAP_AK=${BAIDU_MAP_AK:-}
+    volumes:
+      - /opt/moji-xinglv/data:/app/data

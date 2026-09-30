@@ -37,6 +37,7 @@ const title = computed(() => {
 
       <div class="main__heading">
         <nav class="main__breadcrumb" aria-label="当前位置">
+          <BrandMark v-if="mobile || isSidebarCollapsed" :size="20" decorative class="main__brand-icon" />
           <span>山海行笺</span>
           <AppIcon name="chevron" :size="9" />
           <span>{{ mainMode === 'settings' ? '个人空间' : mainMode === 'plan' ? '我的行程' : '灵感与对话' }}</span>

@@ -1,0 +1,55 @@
+name: 生产环境自动部署
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: 远程 Docker 自动部署
+    runs-on: ubuntu-latest
+    steps:
+      - name: 连接远程服务器并执行 Docker 编排更新
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          password: ${{ secrets.SERVER_PASSWORD }}
+          port: 22
+          timeout: 60s
+          command_timeout: 30m
+          script_stop: true
+          script: |
+            echo "=== 开始自动化部署流程 ==="
+            mkdir -p /opt/moji-xinglv/data
+            cd /opt/moji-xinglv
+
+            if [ ! -d ".git" ]; then
+              echo ">>> 初始化 Git 仓库并拉取..."
+              git init
+              git remote add origin https://github.com/image1005/moji-xinglv.git || git remote set-url origin https://github.com/image1005/moji-xinglv.git
+            fi
+
+            echo ">>> 拉取最新代码..."
+            git fetch origin main
+            git reset --hard origin/main
+
+            if [ ! -f ".env" ]; then
+              echo ">>> 生成默认 .env 配置文件..."
+              cp .env.example .env
+            fi
+
+            echo ">>> 执行 Docker 构建与启动..."
+            docker compose down || true
+            docker compose up -d --build
+
+            echo ">>> 检查容器运行状态..."
+            sleep 4
+            docker ps --filter "name=moji-xinglv"
+            echo "=== 部署流程已成功执行 ==="
