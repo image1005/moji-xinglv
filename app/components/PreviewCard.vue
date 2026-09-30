@@ -119,9 +119,6 @@ async function undo() {
       <button class="preview-card__action" :disabled="busy || !samePlan || preview.version === currentPlanVersion" @click="undo">
         切换到此版本
       </button>
-      <button class="preview-card__action preview-card__action--seal" :disabled="!samePlan || busy" @click="ws.savePlan()">
-        保存当前规划
-      </button>
     </div>
 
     <p v-if="failure" class="feedback" role="alert">{{ failure }}</p>
@@ -321,17 +318,6 @@ async function undo() {
     transform: scale(0.96);
   }
 
-  &--seal {
-    background: var(--cinnabar);
-    border-color: var(--cinnabar);
-    color: #ffffff;
-
-    &:hover:not(:disabled) {
-      background: var(--accent-red-hover);
-      border-color: var(--accent-red-hover);
-      color: #ffffff;
-    }
-  }
 
   &:disabled {
     opacity: 0.5;

@@ -5,7 +5,7 @@ import type { ModelConfiguration } from '#shared/schemas/model-config'
 
 const {
   chat, conversations, currentPlan, currentConversationId, errorMessage, savedAt, modelSettings, attachmentDrafts, processingStatus,
-  loading, sendMessage, retryMessage, stop, savePlan, newSession, createWorkspace, messagesHasMore, loadingHistory, loadOlderMessages, runs, reloadConversation, refreshRuns, offline,
+  loading, sendMessage, retryMessage, stop, newSession, createWorkspace, messagesHasMore, loadingHistory, loadOlderMessages, runs, reloadConversation, refreshRuns, offline,
 } = useWorkspace()
 const tab = ref<'chat' | 'roadmap'>('chat')
 const drafts = reactive<Record<string, string>>({})
@@ -15,7 +15,6 @@ const scroller = ref<HTMLElement | null>(null)
 const textarea = ref<HTMLTextAreaElement | null>(null)
 const stickToBottom = ref(true)
 const sending = ref(false)
-const saving = ref(false)
 const composing = ref(false)
 const localError = ref('')
 const lastRequest = ref<{ key: string; text: string; attachments: Attachment[]; configuration: ModelConfiguration } | null>(null)
@@ -28,7 +27,7 @@ const guide = reactive({ destination: '', days: 3, budget: '', people: 2, pace: 
 const latestRun = computed(() => runs.value[0])
 const messages = computed(() => chat.value?.messages ?? [])
 const streaming = computed(() => chat.value?.status === 'streaming' || chat.value?.status === 'submitted')
-const busy = computed(() => loading.value || sending.value || saving.value || streaming.value || offline.value)
+const busy = computed(() => loading.value || sending.value || streaming.value || offline.value)
 const conversation = computed(() => conversations.value.find((c) => c.id === currentConversationId.value) ?? null)
 const visibleError = computed(() => localError.value || errorMessage.value)
 const canRestore = computed(() => lastRequest.value?.key === draftKey.value && (!!lastRequest.value.text || !!lastRequest.value.attachments.length))
@@ -178,18 +177,6 @@ function dropFiles(event: DragEvent) {
   void acceptFiles(Array.from(event.dataTransfer?.files ?? []))
 }
 
-async function onSave() {
-  if (busy.value || !currentPlan.value) return
-  saving.value = true
-  localError.value = ''
-  try {
-    if (!await savePlan()) localError.value = errorMessage.value || '保存未完成，请重试。'
-  } catch (error) {
-    localError.value = apiErrorMessage(error, '保存未完成，请重试。')
-  } finally {
-    saving.value = false
-  }
-}
 </script>
 
 <template>
@@ -344,9 +331,6 @@ async function onSave() {
           <button type="button" class="composer__attach" :disabled="busy || !modelSettings.capabilities.value?.vision || uploads.length >= 4" title="选择、拖拽或粘贴图片，每张最多 5 MiB" @click="fileInput?.click()"><AppIcon name="mountain" :size="14" />添加图片</button>
           <span class="composer__divider" />
           <span class="composer__hint">{{ loading ? '正在加载行笺…' : streaming ? '正在生成，可随时停止' : 'Enter 发送 · Shift + Enter 换行' }}</span>
-          <button v-if="currentPlan" class="composer__save" :disabled="busy" title="保存当前行程为新版本" @click="onSave">
-            <AppIcon name="book" :size="13" />{{ saving ? '保存中' : '保存行笺' }}
-          </button>
           <button v-if="streaming" class="composer__send composer__send--stop" title="停止生成" aria-label="停止生成" @click="stop()">
             <AppIcon name="stop" :size="15" />
           </button>
@@ -655,27 +639,6 @@ async function onSave() {
 .composer__divider { width: 1px; height: 12px; background: var(--border-primary); }
 .composer__hint { color: var(--text-muted); font-size: 11px; }
 
-.composer__save {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  border: none;
-  padding: 4px 8px;
-  border-radius: 4px;
-  background: none;
-  color: var(--text-secondary);
-  font-size: 11.5px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all $dur-fast $ease-soft;
-
-  &:hover:not(:disabled) {
-    color: var(--cinnabar);
-    background: var(--accent-red-subtle);
-  }
-}
-.composer__save:disabled { opacity: 0.5; }
 
 .composer__send {
   width: 32px;
@@ -703,7 +666,6 @@ async function onSave() {
     transform: scale(0.94);
   }
 }
-.composer__save + .composer__send { margin-left: 6px; }
 .composer__send:disabled {
   color: var(--text-muted);
   background: var(--bg-card-muted);
