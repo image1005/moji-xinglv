@@ -1,6 +1,9 @@
 export default defineNuxtConfig({
   compatibilityDate: '2025-07-15',
   devtools: { enabled: false },
+  runtimeConfig: {
+    public: { baiduMapBrowserAk: '' },
+  },
   modules: ['@nuxtjs/mdc', '@nuxt/eslint'],
   css: ['~/assets/styles/main.scss'],
   typescript: { strict: true, typeCheck: false },

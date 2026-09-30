@@ -2,20 +2,47 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
 import { acquireTravelImage } from '../server/services/travel-images'
 import { trustedImageOrigin } from '../server/services/media-image'
-const mocks = vi.hoisted(() => ({ wiki: vi.fn(), search: vi.fn(), binary: new Map<string, Buffer>(), json: new Map<string, unknown>() }))
+const mocks = vi.hoisted(() => ({ wikidata: vi.fn(), wiki: vi.fn(), openverse: vi.fn(), search: vi.fn(), paid: true, binary: new Map<string, Buffer>(), json: new Map<string, unknown>() }))
 vi.mock('../server/services/wikimedia', () => ({ acquireWikimediaImage: mocks.wiki }))
-vi.mock('../server/providers/tencent-images', () => ({ searchTencentImages: mocks.search, tencentImageSearchEnabled: () => true }))
+vi.mock('../server/services/wikidata-images', () => ({ acquireWikidataImage: mocks.wikidata }))
+vi.mock('../server/services/openverse-images', () => ({ acquireOpenverseImage: mocks.openverse }))
+vi.mock('../server/providers/tencent-images', () => ({ searchTencentImages: mocks.search, tencentImageSearchEnabled: () => mocks.paid }))
 vi.mock('../server/services/cache', () => ({
   getCachedBinary: async (key: string) => mocks.binary.get(key), setCachedBinary: async (key: string, value: Buffer) => { mocks.binary.set(key, value) },
   getCachedJson: async (key: string) => mocks.json.get(key), setCachedJson: async (key: string, value: unknown) => { mocks.json.set(key, value) },
 }))
 const entity = { entityId: 'spot:1', entityType: 'spot' as const, name: '晋祠', city: '太原（晋源区）', address: '', fingerprint: 'unchanged' }
 const candidate = (title: string, url = 'https://img01.sogoucdn.com/test.jpg') => ({ title, thumbnailUrl: url, siteUrl: 'https://example.org/article', siteName: '测试来源' })
-beforeEach(() => { vi.clearAllMocks(); mocks.binary.clear(); mocks.json.clear(); mocks.wiki.mockResolvedValue(null) })
+beforeEach(() => { vi.resetAllMocks(); mocks.binary.clear(); mocks.json.clear(); mocks.paid = true; mocks.wikidata.mockResolvedValue(null); mocks.wiki.mockResolvedValue(null); mocks.openverse.mockResolvedValue(null) })
 afterEach(() => vi.unstubAllGlobals())
 it('免费来源成功时不调用付费搜索', async () => {
   mocks.wiki.mockResolvedValue({ image: { provider: 'Wikimedia Commons' } })
   expect(await acquireTravelImage(entity)).toMatchObject({ image: { provider: 'Wikimedia Commons' } })
+  expect(mocks.search).not.toHaveBeenCalled()
+  expect(mocks.openverse).not.toHaveBeenCalled()
+})
+it('Wikidata确认代表图后不再消耗其它图片来源', async () => {
+  mocks.wikidata.mockResolvedValue({ image: { provider: 'Wikidata / Wikimedia Commons' } })
+  expect(await acquireTravelImage(entity)).toMatchObject({ image: { provider: 'Wikidata / Wikimedia Commons' } })
+  expect(mocks.wiki).not.toHaveBeenCalled()
+  expect(mocks.openverse).not.toHaveBeenCalled()
+  expect(mocks.search).not.toHaveBeenCalled()
+})
+it('免费模式下前序来源故障仍由Openverse补图，并传递重试和总期限', async () => {
+  mocks.paid = false
+  mocks.wikidata.mockRejectedValue(new TypeError('wikidata unavailable'))
+  mocks.wiki.mockRejectedValue(new TypeError('wiki unavailable'))
+  mocks.openverse.mockResolvedValue({ image: { provider: 'Openverse' } })
+  expect(await acquireTravelImage(entity, true)).toMatchObject({ image: { provider: 'Openverse' } })
+  for (const provider of [mocks.wikidata, mocks.wiki, mocks.openverse]) expect(provider).toHaveBeenCalledWith(entity, true, expect.any(AbortSignal))
+  expect(mocks.search).not.toHaveBeenCalled()
+})
+it('免费来源均未匹配时返回空，限流则保留真实错误，均不调用付费接口', async () => {
+  mocks.paid = false
+  expect(await acquireTravelImage(entity)).toBeNull()
+  const failure = new Error('rate limited')
+  mocks.openverse.mockRejectedValue(failure)
+  await expect(acquireTravelImage(entity)).rejects.toBe(failure)
   expect(mocks.search).not.toHaveBeenCalled()
 })
 it('拒绝私网、假域名、非标准端口和未核实任意原图站点', async () => {

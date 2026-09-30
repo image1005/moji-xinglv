@@ -9,7 +9,9 @@ export function trustedImageOrigin(value: string) {
   try {
     const url = new URL(value)
     return url.protocol === 'https:' && !url.username && !url.password && !url.port
-      && (['upload.wikimedia.org', 'thumb.wikimedia.org', 'lizhicdn.search.qq.com', 'imgcdn.qq.com'].includes(url.hostname) || /^img\d{2}\.sogoucdn\.com$/.test(url.hostname))
+      && (['upload.wikimedia.org', 'thumb.wikimedia.org', 'lizhicdn.search.qq.com', 'imgcdn.qq.com'].includes(url.hostname) || /^img\d{2}\.sogoucdn\.com$/.test(url.hostname)
+        || url.hostname === 'api.openverse.org' && !url.search && !url.hash && /^\/v1\/images\/[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}\/thumb\/$/i.test(url.pathname)
+        || url.hostname === 'live.staticflickr.com' && !url.search && !url.hash && /^\/\d+\/\d+_[a-f0-9]+(?:_[a-z])?\.jpg$/i.test(url.pathname))
   } catch { return false }
 }
 

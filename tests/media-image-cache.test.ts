@@ -1,6 +1,6 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import sharp from 'sharp'
-import { getResourceImageBytes } from '../server/services/media-image'
+import { getResourceImageBytes, trustedImageOrigin } from '../server/services/media-image'
 
 const cache = vi.hoisted(() => ({ bytes: new Map<string, Buffer>(), writes: vi.fn() }))
 vi.mock('../server/services/cache', () => ({
@@ -58,4 +58,29 @@ it('私网URL和提前取消的调用不能借已有缓存绕过边界', async (
   const controller = new AbortController(); controller.abort(new Error('cancelled'))
   await expect(getResourceImageBytes(url, 'existing', controller.signal)).rejects.toThrow('cancelled')
   expect(fetch).not.toHaveBeenCalled()
+})
+it('仅允许Openverse受控UUID缩略图，不开放任意API路径、参数或来源图片', async () => {
+  const thumbnail = 'https://api.openverse.org/v1/images/e147b616-539b-4938-a6eb-a1113836f340/thumb/'
+  expect(trustedImageOrigin(thumbnail)).toBe(true)
+  expect(trustedImageOrigin('https://live.staticflickr.com/65535/54199297843_0dbd1c370a_b.jpg')).toBe(true)
+  for (const unsafe of [
+    `${thumbnail}?url=http://127.0.0.1/`, `${thumbnail}#fragment`, thumbnail.replace('api.openverse.org', 'api.openverse.org.evil.org'),
+    thumbnail.replace('e147b616-539b-4938-a6eb-a1113836f340', 'unknown'), 'https://api.openverse.org/v1/images/',
+    'https://api.openverse.org/redirect?url=http://127.0.0.1/', 'https://www.flickr.com/photos/image.jpg',
+    'https://live.staticflickr.com/redirect', 'https://live.staticflickr.com/65535/54199297843_0dbd1c370a_b.jpg?url=http://localhost',
+    'https://live.staticflickr.com.evil.org/65535/54199297843_0dbd1c370a_b.jpg',
+  ]) expect(trustedImageOrigin(unsafe)).toBe(false)
+  const fetcher = vi.fn().mockResolvedValue(new Response(bytes))
+  vi.stubGlobal('fetch', fetcher)
+  expect((await sharp(await getResourceImageBytes(thumbnail, 'openverse-image')).metadata()).format).toBe('webp')
+  expect(fetcher).toHaveBeenCalledWith(thumbnail, expect.objectContaining({ redirect: 'error' }))
+})
+it('Openverse返回重定向或错误内容时不写图片缓存', async () => {
+  const thumbnail = 'https://api.openverse.org/v1/images/e147b616-539b-4938-a6eb-a1113836f340/thumb/'
+  const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { Location: 'http://127.0.0.1/private' } }))
+  vi.stubGlobal('fetch', fetcher)
+  await expect(getResourceImageBytes(thumbnail, 'redirect')).rejects.toThrow()
+  fetcher.mockResolvedValue(Response.json({ error: 'missing thumbnail' }, { status: 424 }))
+  await expect(getResourceImageBytes(thumbnail, 'unavailable')).rejects.toThrow()
+  expect(cache.bytes.size).toBe(0)
 })

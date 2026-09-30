@@ -216,7 +216,7 @@ function dropFiles(event: DragEvent) {
           <p class="welcome__description">把向往写在这里，让每一程都有自己的模样。</p>
           <div class="welcome__window anim-float" aria-hidden="true">
             <div />
-            <AppIcon name="mountain" :size="76" />
+            <BrandMark :size="104" decorative />
             <span>一笺一世界</span>
           </div>
         </div>
@@ -469,7 +469,7 @@ function dropFiles(event: DragEvent) {
 .welcome__window::before { content: ''; position: absolute; inset: 7px; border: 1px solid var(--border-secondary); border-radius: 50%; }
 .welcome__window > div { position: absolute; top: 23px; bottom: 22px; width: 96px; border-left: 1px solid var(--border-secondary); border-right: 1px solid var(--border-secondary); }
 .welcome__window > div::after { content: ''; position: absolute; left: -10px; right: -10px; top: 22px; height: 59px; border-top: 1px solid var(--border-secondary); border-bottom: 1px solid var(--border-secondary); }
-.welcome__window > .app-icon { z-index: 1; padding: 12px; background: var(--bg-page); color: var(--bamboo); }
+.welcome__window > .brand-mark { z-index: 1; max-width: 75%; height: auto; }
 .welcome__window > span { position: absolute; right: -19px; top: 34px; writing-mode: vertical-rl; color: var(--text-muted); font-size: 10px; letter-spacing: 0.23em; font-family: var(--font-serif); }
 
 .welcome__suggest-head { display: flex; justify-content: space-between; margin-bottom: 13px; font-size: 12px; color: var(--text-secondary); }

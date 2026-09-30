@@ -9,12 +9,16 @@ import { createProductProviderFetch } from './mock-product-providers'
 import { startProductModel } from './mock-product-ai'
 import type { PlanEntity } from '../shared/utils/plan-entities'
 
+const real = process.argv.includes('--real')
+const free = ['--free', '--wikidata', '--openverse'].some(flag => process.argv.includes(flag))
+if (free && !real) throw new Error('Free provider probes require --real; default verification uses isolated fixtures.')
+if (free && process.argv.includes('--tencent')) throw new Error('Free provider verification cannot be combined with --tencent.')
 const temporary = await mkdtemp(join(tmpdir(), 'verify-media-'))
 process.env.DATABASE_URL = join(temporary, 'test-media.db')
 process.env.AI_PROVIDER = 'deepseek'
 process.env.AI_MODEL = 'deepseek-flash'
 process.env.AI_API_KEY = process.env.TAVILY_API_KEY = process.env.BAIDU_MAP_AK = 'fixture-only'
-if (!process.argv.includes('--real')) process.env.MEDIA_IMAGE_SEARCH = 'off'
+if (!real || free) process.env.MEDIA_IMAGE_SEARCH = 'off'
 const storage = new Map<string, unknown>()
 Object.assign(globalThis, { useStorage: () => ({ getItem: async (key: string) => storage.get(key), setItem: async (key: string, value: unknown) => { storage.set(key, value) }, removeItem: async (key: string) => { storage.delete(key) } }) })
 const originalFetch = globalThis.fetch
@@ -22,7 +26,39 @@ globalThis.fetch = createProductProviderFetch(originalFetch)
 const { db } = await import('../server/utils/db')
 const schema = await import('../server/database/schema')
 try {
-  if (process.argv.includes('--real') && process.argv.includes('--tencent')) {
+  if (real && free) {
+    globalThis.fetch = originalFetch
+    migrate(db, { migrationsFolder: resolve('server/database/migrations') })
+    const { acquireWikidataImage } = await import('../server/services/wikidata-images')
+    const { acquireOpenverseImage } = await import('../server/services/openverse-images')
+    const { getResourceImageBytes } = await import('../server/services/media-image')
+    const { imageFailure } = await import('../server/providers/media-errors')
+    const specificProviders = process.argv.includes('--wikidata') || process.argv.includes('--openverse')
+    const providers = [
+      { name: 'wikidata', acquire: acquireWikidataImage },
+      { name: 'openverse', acquire: acquireOpenverseImage },
+    ].filter(provider => !specificProviders || process.argv.includes(`--${provider.name}`))
+    // A single named sample per provider keeps anonymous search use bounded.
+    for (const provider of providers) {
+      const entity: PlanEntity = { entityId: `spot:${provider.name}-probe`, entityType: 'spot', name: '晋祠', city: '太原', address: '', fingerprint: 'free-probe' }
+      const started = Date.now()
+      try {
+        const result = await provider.acquire(entity)
+        if (!result) {
+          process.exitCode = 1
+          console.log(JSON.stringify({ mode: `real-${provider.name}`, entity: entity.name, city: entity.city, status: 'no-confirmed-image', durationMs: Date.now() - started }))
+          continue
+        }
+        const bytes = await getResourceImageBytes(result.originUrl, result.cacheKey)
+        const decoded = await sharp(bytes).metadata()
+        assert.ok(decoded.width && decoded.height, 'Real provider image must decode into nonempty dimensions')
+        console.log(JSON.stringify({ mode: `real-${provider.name}`, entity: entity.name, city: entity.city, status: 'image-fetched-and-decoded', matchedName: result.image.matchedName, source: result.image.sourceUrl, attribution: result.image.attribution, width: decoded.width, height: decoded.height, durationMs: Date.now() - started }))
+      } catch (error) {
+        process.exitCode = 1
+        console.log(JSON.stringify({ mode: `real-${provider.name}`, entity: entity.name, city: entity.city, status: 'not-verified', ...imageFailure(error), durationMs: Date.now() - started }))
+      }
+    }
+  } else if (real && process.argv.includes('--tencent')) {
     globalThis.fetch = originalFetch
     migrate(db, { migrationsFolder: resolve('server/database/migrations') })
     process.env.MEDIA_IMAGE_SEARCH = 'tencent'
@@ -49,7 +85,7 @@ try {
       process.exitCode = 1
       console.log(JSON.stringify({ mode: 'real-tencent', status: 'not-verified', ...imageFailure(error) }))
     }
-  } else if (process.argv.includes('--real')) {
+  } else if (real) {
     globalThis.fetch = originalFetch
     migrate(db, { migrationsFolder: resolve('server/database/migrations') })
     const { acquireWikimediaImage } = await import('../server/services/wikimedia')
@@ -108,6 +144,41 @@ try {
   migrate(db, { migrationsFolder: migrationRoot })
   assert.equal(db.select().from(schema.attachmentLinks).where(eq(schema.attachmentLinks.attachmentId, oldAttachmentId)).get()!.messageId, oldMessage.id, '0003 attachment references backfilled by 0005')
   assert.equal(db.select().from(schema.plans).where(eq(schema.plans.id, oldPlan.id)).get()!.title, '历史杭州')
+  const { acquireWikidataImage } = await import('../server/services/wikidata-images')
+  const { acquireOpenverseImage } = await import('../server/services/openverse-images')
+  const { getResourceImageBytes } = await import('../server/services/media-image')
+  const beforeFreeFixtures = globalThis.fetch
+  const freeFixtureId = '00000000-0000-4000-8000-000000000001'
+  const freeFixtureOrigin = `https://api.openverse.org/v1/images/${freeFixtureId}/thumb/`
+  const freeFixtureBytes = await sharp({ create: { width: 240, height: 160, channels: 3, background: '#527663' } }).png().toBuffer()
+  const freeDownloads = new Set<string>()
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    if (url.hostname === 'www.wikidata.org' && url.pathname === '/w/api.php') {
+      if (url.searchParams.get('action') === 'wbsearchentities') return Response.json({ search: url.searchParams.get('search') === '太原' ? [] : [{ id: 'Q123', label: '晋祠' }] })
+      return Response.json({ entities: { Q123: { id: 'Q123', labels: { zh: { value: '晋祠' } }, descriptions: { zh: { value: '中国太原市的一座祠庙' } }, claims: { P18: [{ mainsnak: { snaktype: 'value', datavalue: { value: 'Shanhai-free-fixture.png' } } }] } } } })
+    }
+    if (url.hostname === 'commons.wikimedia.org') return Response.json({ query: { pages: { '1': { title: 'File:Shanhai-free-fixture.png', imageinfo: [{ mime: 'image/png', url: 'https://upload.wikimedia.org/free-wikidata-fixture.png', descriptionurl: 'https://commons.wikimedia.org/wiki/File:Shanhai-free-fixture.png', extmetadata: { Artist: { value: '[本地测试图] 山海行笺' }, LicenseShortName: { value: 'CC BY-SA 4.0' } } }] } } } })
+    if (url.hostname === 'api.openverse.org' && url.pathname === '/v1/images/') return Response.json({ results: [{ id: freeFixtureId, title: '[本地测试] 太原晋祠照片', tags: [{ name: 'photograph' }], creator: '[本地测试图] 山海行笺', license: 'by-sa', license_version: '4.0', license_url: 'https://creativecommons.org/licenses/by-sa/4.0/', foreign_landing_url: 'https://commons.wikimedia.org/wiki/File:Shanhai-free-fixture.png', source: 'wikimedia', thumbnail: freeFixtureOrigin }] })
+    if (url.href === freeFixtureOrigin || url.href === 'https://upload.wikimedia.org/free-wikidata-fixture.png') {
+      freeDownloads.add(url.hostname)
+      return new Response(new Uint8Array(freeFixtureBytes), { headers: { 'content-type': 'image/png' } })
+    }
+    return beforeFreeFixtures(input, init)
+  }, { preconnect: beforeFreeFixtures.preconnect }) as typeof fetch
+  try {
+    for (const [provider, acquire] of [['Wikidata', acquireWikidataImage], ['Openverse', acquireOpenverseImage]] as const) {
+      const image = await acquire({ entityId: `spot:${provider}-fixture`, entityType: 'spot', name: '晋祠', city: '太原', address: '', fingerprint: 'free-fixture' })
+      assert.ok(image, `${provider} fixture must produce a confirmed image`)
+      assert.ok(image.image.provider.includes(provider), `${provider} must retain its provider attribution`)
+      assert.match(image.image.attribution, /本地测试图/)
+      const decoded = await sharp(await getResourceImageBytes(image.originUrl, image.cacheKey)).metadata()
+      assert.equal(decoded.width, 240)
+      assert.equal(decoded.height, 160)
+    }
+    assert.deepEqual([...freeDownloads].sort(), ['api.openverse.org', 'upload.wikimedia.org'], 'Both free sources download and decode their isolated image bytes')
+  } finally { globalThis.fetch = beforeFreeFixtures }
+  console.log(JSON.stringify({ mode: 'isolated-free-provider-fixtures', passed: ['wikidata-identity-p18-image', 'openverse-anonymous-image', 'both-image-decodes', 'source-attribution'] }))
   const { getPlanSnapshot, patchPlan, createPlan } = await import('../server/services/plan')
   const { getPlanResources, enrichPlanResources, readPlanResourceImage } = await import('../server/services/media')
   const { createAttachment, resolveAttachments, attachmentModelParts, bindAttachments, removeAttachment, maintainAttachments } = await import('../server/services/attachments')
@@ -146,10 +217,42 @@ try {
   await assert.rejects(() => getPlanResources('other', oldPlan.id), /规划不存在/)
   await assert.rejects(() => readPlanResourceImage('other', oldPlan.id, resource.entityId), /规划不存在/)
   assert.equal((await getPlanSnapshot('owner', oldPlan.id)).row.revision, snapshot.row.revision, 'Resource updates cannot create plan revisions')
+  const { IMAGE_RESOLVER_VERSION } = await import('../server/services/travel-images')
+  const legacyMissing = { ...resource, image: null, status: 'not_found' as const, imageIssue: { code: 'no_match' as const, message: '旧来源没有匹配图片' }, error: '旧来源没有匹配图片' }
+  delete legacyMissing.imageResolverVersion
+  db.update(schema.planResources).set({ resourceJson: legacyMissing, imageOriginUrl: null, imageCacheKey: null }).where(eq(schema.planResources.id, initialRow.id)).run()
+  const legacyPending = (await getPlanResources('owner', oldPlan.id)).resources.find(item => item.entityId === resource.entityId)!
+  assert.equal(legacyPending.status, 'pending', 'New free sources retry a historical missing image automatically')
+  assert.equal(legacyPending.imageIssue, null, 'Historical no-match issue must not block the new attempt')
+  const beforeLegacyRetry = globalThis.fetch
+  let legacyImageLookups = 0
+  db.delete(schema.cache).run(); storage.clear()
+  globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
+    if (['www.wikidata.org', 'zh.wikipedia.org', 'commons.wikimedia.org', 'api.openverse.org'].includes(url.hostname)) {
+      legacyImageLookups++
+      return Response.json({ search: [], entities: {}, results: [], query: { pages: {} } })
+    }
+    return beforeLegacyRetry(input, init)
+  }, { preconnect: beforeLegacyRetry.preconnect }) as typeof fetch
+  try {
+    const retriedMissing = (await enrichPlanResources('owner', oldPlan.id, snapshot.row.revision)).resources.find(item => item.entityId === resource.entityId)!
+    assert.ok(legacyImageLookups > 0, 'Historical missing media must actually consult the new image chain')
+    assert.equal(retriedMissing.image, null)
+    assert.equal(retriedMissing.imageResolverVersion, IMAGE_RESOLVER_VERSION)
+    assert.notEqual(retriedMissing.status, 'pending', 'A completed no-match attempt must stop automatic retries')
+    const callsAfterRetry = legacyImageLookups
+    await enrichPlanResources('owner', oldPlan.id, snapshot.row.revision)
+    assert.equal(legacyImageLookups, callsAfterRetry, 'Refreshing after a completed no-match cannot loop provider requests')
+  } finally {
+    globalThis.fetch = beforeLegacyRetry
+    db.update(schema.planResources).set({ resourceJson: initialRow.resourceJson, imageOriginUrl: initialRow.imageOriginUrl, imageCacheKey }).where(eq(schema.planResources.id, initialRow.id)).run()
+  }
+  console.log(JSON.stringify({ mode: 'isolated-free-provider-upgrade', passed: ['legacy-missing-retry', 'completed-missing-no-retry-loop'] }))
   const fixtureFetch = globalThis.fetch
   db.delete(schema.cache).run(); storage.clear()
   globalThis.fetch = Object.assign(async (input: RequestInfo | URL, init?: RequestInit) => {
-    if (String(input).includes('zh.wikipedia.org')) throw new Error('Fixture image provider outage')
+    if (['www.wikidata.org', 'zh.wikipedia.org', 'commons.wikimedia.org', 'api.openverse.org'].some(host => String(input).includes(host))) throw new Error('Fixture image provider outage')
     return fixtureFetch(input, init)
   }, { preconnect: fixtureFetch.preconnect }) as typeof fetch
   const retried = await enrichPlanResources('owner', oldPlan.id, snapshot.row.revision, resource.entityId)

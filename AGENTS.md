@@ -66,7 +66,7 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 
 ## 硬约束（最容易踩的坑）
 
-1. 百度 AK 仅服务端：只允许 `server/services/baidu.ts` 读 `BAIDU_MAP_AK`；代理 `staticimage/v2`（markers/paths 画路线）与 `panorama/v2`，按本轮授权增加受控 `place/v2/search` 和 `geocoding/v3`（见 PRD 裁决 10）；禁止引入百度 JS API GL 和浏览器端 AK。未知位置保持待定位，不让模型猜坐标。
+1. 百度服务端 AK 仅服务端：只允许 `server/services/baidu.ts` 读 `BAIDU_MAP_AK`；代理 `staticimage/v2`、`panorama/v2`、受控 `place/v2/search` 和 `geocoding/v3`。城市舆图按本轮拖动/缩放需求改用 JSAPI 4.0，单独配置公开的 `NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK` 并限制 Referer；严禁复用或下发服务端 AK。未知位置保持待定位，不让模型猜坐标。
 2. 缓存优先：请求百度前必须先查前端 IndexedDB → 后端 `cache` 表 / Nitro storage（`key = hash(api + params)`，校验 `expires_at`）；未命中才请求并写回（内存 + DB）
 3. AI 只产出结构化编辑（工具返回值经 Zod 校验）；服务端校验后更新同轮持久化草稿，完整完成时提交最终正式版本；禁止用 AI 文本整体覆盖 `plan_json`。优先 `apply_plan_edits` 原子操作，`patch_plan_json` 仅兜底，不向 AI 暴露全量覆盖工具。行程 JSON 为严格契约：未知字段必须 400 拒绝并给出改名提示（如 `stay → lodging`），禁止静默丢弃；界面不提供 JSON 源码编辑，全部走可视化表单
 4. 工具作用域：每个 tool 必须接收并校验当前 `plan_id`，禁止跨规划读写
@@ -84,6 +84,7 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 ## 环境变量（.env，保持 .env.example 同步）
 
 - `BAIDU_MAP_AK` — 百度服务端 AK（全景需申请 "for server" 类型）
+- `NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK` — 城市交互地图专用浏览器端 AK；公开配置，使用独立应用与 Referer 白名单
 - `AUTH_SECRET`、`BETTER_AUTH_URL`
 - `DATABASE_URL` — 形如 `file:./data/app.db`
 - `AI_API_KEY` / `AI_BASE_URL` / `AI_MODEL` — OpenAI 兼容 LLM

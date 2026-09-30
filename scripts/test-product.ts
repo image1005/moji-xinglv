@@ -29,6 +29,7 @@ const env = {
   AI_PROVIDER: 'deepseek', AI_MODEL: 'deepseek-flash', AI_API_KEY: 'fixture-only', AI_BASE_URL: mock.baseURL,
   AI_DEEPSEEK_THINKING_LEVELS: 'off,light,standard,deep', AI_SUPPORTS_VISION: 'true',
   TAVILY_API_KEY: 'fixture-only', BAIDU_MAP_AK: 'fixture-only', PRODUCT_MOCK_PROVIDERS: '1',
+  NUXT_PUBLIC_BAIDU_MAP_BROWSER_AK: '',
   NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), HOST: '127.0.0.1', PORT: String(port),
 }
 const steps: string[] = [], pageErrors: string[] = [], wire: { type: string; binary: boolean }[] = []
