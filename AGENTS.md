@@ -68,7 +68,7 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 
 1. 百度 AK 仅服务端：只允许 `server/services/baidu.ts` 读 `BAIDU_MAP_AK`；代理 `staticimage/v2`（markers/paths 画路线）与 `panorama/v2`，按本轮授权增加受控 `place/v2/search` 和 `geocoding/v3`（见 PRD 裁决 10）；禁止引入百度 JS API GL 和浏览器端 AK。未知位置保持待定位，不让模型猜坐标。
 2. 缓存优先：请求百度前必须先查前端 IndexedDB → 后端 `cache` 表 / Nitro storage（`key = hash(api + params)`，校验 `expires_at`）；未命中才请求并写回（内存 + DB）
-3. AI 只产出结构化编辑（工具返回值经 Zod 校验）；服务端校验后合并生成新版本；禁止用 AI 文本整体覆盖 `plan_json`。优先 `apply_plan_edits` 原子操作，`patch_plan_json` 仅兜底，不向 AI 暴露全量覆盖工具。行程 JSON 为严格契约：未知字段必须 400 拒绝并给出改名提示（如 `stay → lodging`），禁止静默丢弃；界面不提供 JSON 源码编辑，全部走可视化表单
+3. AI 只产出结构化编辑（工具返回值经 Zod 校验）；服务端校验后更新同轮持久化草稿，完整完成时提交最终正式版本；禁止用 AI 文本整体覆盖 `plan_json`。优先 `apply_plan_edits` 原子操作，`patch_plan_json` 仅兜底，不向 AI 暴露全量覆盖工具。行程 JSON 为严格契约：未知字段必须 400 拒绝并给出改名提示（如 `stay → lodging`），禁止静默丢弃；界面不提供 JSON 源码编辑，全部走可视化表单
 4. 工具作用域：每个 tool 必须接收并校验当前 `plan_id`，禁止跨规划读写
 5. 版本只追加不删除：`plan_versions` 含 `version`（自增）、`parent_version_id`、`source`、`diff_json`、`message_id`；Undo（切换版本）= 移动 `plans.current_version_id` 指针直接使用目标版本 + 聊天流插入系统消息，不新建版本；之后继续编辑以当前版本为父分叉
 6. 每次 AI 编辑后，聊天流必须插入可视化预览卡片（摘要 / 每日安排 / 街景缩略图；可展开、复制、保存、Diff）
@@ -79,7 +79,7 @@ docs/API.md / docs/DEV.md  # API 与开发文档
 11. 国风视觉：宣纸底 / 墨 / 朱砂 / 竹青 / 鎏金，宋楷标题，印章式按钮，克制圆角；移动端左侧栏折叠为抽屉
 12. 新 API 必须有 Zod 校验（入参用 `readValidatedBody` / `getValidatedQuery` 以返回 400）；新表必须走 migration；所有 DB 操作走 Drizzle
 13. 工作区模型：工作区 = 规划；每个会话必须绑定 `plan_id`；左栏为可折叠工作区文件夹（顶部「规划预览与编辑」入口 + 会话列表）；中间主区在「对话/版本路线」与「规划预览与编辑」之间切换，不再有独立右栏
-14. AI 编辑以工具驱动（ReAct 多步循环），不强制读后写顺序；一轮对话（同一 `assistantMessageId`）只保留一个版本：仍是当前版本时原地更新，指针移动或换轮后追加
+14. AI 编辑以工具驱动（ReAct 多步循环），不强制读后写顺序；一轮对话（同一 `assistantMessageId`）只维护一个服务端草稿，完整完成且基线无冲突时只追加一次最终有效正式版本。失败、取消、超时、重启保留上一成功版本及可恢复部分成果，不静默覆盖；独立手工保存、有效历史和分支保留。版本名独立于行程标题，由模型异步命名并用 `nameRevision` 保护，用户改名优先；名称请求不得进入数据库事务
 
 ## 环境变量（.env，保持 .env.example 同步）
 

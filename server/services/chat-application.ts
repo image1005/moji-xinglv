@@ -1,6 +1,6 @@
 import { handleChatStream } from '@mastra/ai-sdk'
 import type { UIMessageChunk } from 'ai'
-import { and, eq } from 'drizzle-orm'
+import { and, eq, gte, lt } from 'drizzle-orm'
 import { createError, type H3Event } from 'h3'
 import { extractUserText, trustedHistory } from '../../shared/schemas/chat'
 import type { ChatRequest } from '../../shared/schemas/chat-protocol'
@@ -8,7 +8,7 @@ import { PlanMutationResultSchema } from '../../shared/schemas/preview'
 import { buildInstructions, createTravelMastra } from '../agents/travel-agent'
 import { ALL_TOOLS, MUTATION_TOOLS } from '../agents/tool-names'
 import { toolInputError } from '../agents/tool-inputs'
-import { messages, planVersions } from '../database/schema'
+import { messages, planRunDrafts, planVersions } from '../database/schema'
 import { resolveAgentsMd } from '../services/agents-md'
 import { appendMessage, getConversation, listMessages, touchConversation } from '../services/conversation'
 import { getPlanSnapshot } from '../services/plan'
@@ -143,7 +143,12 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
             content: text + (cancelled ? '\n\n[生成已停止]' : failed ? `\n\n${failureMessage}` : !text && !toolCalls.length ? '本次未返回文字，请重试。' : ''),
             toolCalls: toolCalls.length ? toolCalls : null,
           }).where(eq(messages.id, assistantRow.id))
-          finishRun(task.id, cancelled ? 'cancelled' : failed ? 'failed' : 'completed', failed ? 'generation_failed' : undefined)
+          const terminal = finishRun(task.id, cancelled ? 'cancelled' : failed ? 'failed' : 'completed', failed ? 'generation_failed' : undefined)
+          if (terminal === 'failed' && !failed) {
+            failed = true
+            failureMessage = '规划已被其他操作更新，本轮成果已保留为恢复草稿，请比较后确认恢复。'
+            await db.update(messages).set({ content: `${text}\n\n${failureMessage}` }).where(eq(messages.id, assistantRow.id))
+          }
           recordUsage(failed || cancelled ? 'error' : 'success')
         } catch (error) { finishRun(task.id, 'failed', 'checkpoint_failed'); throw error }
       })()
@@ -215,7 +220,16 @@ export async function executeChat(event: H3Event, user: { id: string; name: stri
               const version = output?.versionId ? await db.select({ id: planVersions.id }).from(planVersions).where(and(
                 eq(planVersions.id, output.versionId), eq(planVersions.planId, planId), eq(planVersions.version, output.version),
               )).get() : null
-              if (!output || output.preview.planId !== planId || output.preview.version !== output.version || !version) {
+              const draft = output?.draftId ? await db.select({ id: planRunDrafts.id, version: planVersions.version }).from(planRunDrafts)
+                .leftJoin(planVersions, and(eq(planVersions.id, planRunDrafts.baseVersionId), eq(planVersions.planId, planId))).where(and(
+                eq(planRunDrafts.id, output.draftId), eq(planRunDrafts.planId, planId), eq(planRunDrafts.runId, task.id),
+                eq(planRunDrafts.messageId, assistantRow.id), eq(planRunDrafts.status, 'active'),
+                // The producer may already have persisted the next tool before this output is consumed.
+                gte(planRunDrafts.revision, output.revision ?? -1), lt(planRunDrafts.baseRevision, output.revision ?? -1),
+              )).get() : null
+              if (!output || output.preview.planId !== planId || output.preview.version !== output.version
+                || (output.draftId ? !draft || (draft.version ?? 0) !== output.version || output.versionId !== null || output.preview.draftId !== output.draftId || output.preview.status !== 'draft'
+                  : !version || output.preview.draftId !== undefined || output.preview.status !== undefined)) {
                 call.error = TOOL_FAILURE
                 controller.enqueue({ type: 'tool-output-error', toolCallId: part.toolCallId as string, errorText: TOOL_FAILURE })
                 return

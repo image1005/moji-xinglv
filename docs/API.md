@@ -30,17 +30,38 @@
 ### 保存与版本
 
 - `POST /api/plans/:id/save` → `{ planJson?, conversationId?, expectedVersion?, expectedRevision? }`
-  手动保存：内容有变化生成新版本（`source=user`）；无变化返回 `skipped: true` 不产生版本。
-  传入 `conversationId` 时先校验该会话属于当前用户与规划，再插入系统消息与预览卡片。
+  手动保存：内容有变化生成新版本（`source=user`）；无变化返回 `skipped: true`，不产生版本、不推进修订号，也不插入“无变化”系统消息。
+  传入 `conversationId` 时先校验该会话属于当前用户与规划；实际保存成功才插入一条系统消息与预览卡片。独立表单保存继续可用，不按时间窗口合并。
 - `POST /api/plans/:id/switch` → `{ version, conversationId?, expectedVersion?, expectedRevision? }`
   切换当前版本到指定版本：**只移动 `plans.current_version_id` 指针，不新建版本**，历史完整保留；附带系统消息与预览卡片。
   之后继续编辑会以 `max(version)+1` 追加新版本，`parent_version_id` 指向切换后的当前版本，在版本路线图中形成分叉。
 - 保存返回 `{ planId, version, revision, versionId, skipped, preview }`；切换返回 `{ version, revision, versionId, switched: true, preview }`。
-- `expectedVersion` 为客户端最后读取的**当前版本号**，不是切换目标；`expectedRevision` 为该快照的单调递增修订号。手工客户端应同时发送两者，防止切回旧版本和 AI 同轮原地更新绕过旧版本检测。API 为兼容旧调用允许省略；单独发送版本号不能检测同版本内更新。任一已传值不匹配返回 409；无变化保存也先检查。冲突后保留本地草稿，读取最新内容并由用户明确重新应用，不自动覆盖。
-- 规划快照、版本、修订号与关联系统消息在同一事务中写入；AI 提交时同事务更新关联助手消息的预览和版本引用。参数、归属和冲突校验失败不留下部分修改。切换版本不新增版本；规划修订号仍向前推进，不随历史版本倒退。
-- `GET /api/plans/:id/versions` → 版本列表（含 `source`、`diffJson`、`parentVersionId`、`messageId`）
+- `expectedVersion` 为客户端最后读取的**当前版本号**，不是切换目标；`expectedRevision` 为该快照的单调递增修订号。手工客户端应同时发送两者，防止切回旧版本和 AI 同轮草稿更新绕过旧版本检测。API 为兼容旧调用允许省略；单独发送版本号不能检测同版本内更新。任一已传值不匹配返回 409；无变化保存也先检查。冲突后保留本地草稿，读取最新内容并由用户明确重新应用，不自动覆盖。
+- 正式提交时规划快照、版本、修订号与关联系统消息在同一事务中写入；AI 完成提交时同事务更新关联助手消息的预览和版本引用。参数、归属和冲突校验失败不留下部分修改。切换版本不新增版本；规划修订号仍向前推进，不随历史版本倒退。运行中草稿只推进修订号并持久化草稿/预览，不覆盖 `GET /api/plans/:id` 返回的上一成功行程 JSON。
+- `GET /api/plans/:id/versions` → 版本列表（原有 `id`、`version`、`source`、`diffJson`、`parentVersionId`、`messageId`、`createdAt` 全部保留，增加 `name`、`nameSource`、`nameRevision`）
 - `GET /api/plans/:id/versions?paged=true&limit=50&cursor=...` → `{ items, nextCursor, hasMore }`
-- `GET /api/plans/:id/versions/:version` → `{ plan }` 指定版本的完整 JSON
+- `GET /api/plans/:id/versions/:version` → `{ plan }` 指定版本的完整 JSON；`:version` 是展示版本号，不是数据库版本 ID，已有响应形状保持不变。
+
+### 版本名称
+
+- `name: string | null`：独立版本名称，不修改行程标题、会话标题或版本号。
+- `nameSource: 'ai' | 'user' | 'fallback' | null`：名称来源。
+- `nameRevision: number`：独立命名修订号。共享 `VersionSchema` 兼容旧响应缺字段，依次默认 `null`、`null`、`0`；旧数据库迁移也保留此初始状态。
+- `PATCH /api/plans/:id/versions/:version/name`，请求 `{ name: string, expectedNameRevision: number }`，返回 `{ version: VersionItem }`。`:version` 使用展示版本号。
+- 名称 trim 后须为 1–40 字纯文本；空值、非法文本、缺失或非法修订号返回 400。先验证登录用户与规划归属；不存在或无权访问的规划/版本返回 404。名称修订号不匹配返回 409。
+- 改名只推进 `nameRevision`，不创建版本，不改变行程 JSON、父子关系、当前版本指针或规划 `revision`。客户端应使用返回的完整 `VersionItem` 替换列表项，下一次改名携带新的 `nameRevision`。
+- 新正式版本提交后，后端使用现有模型根据最终内容和相对父版本的变化生成简短具体的中文名称；每个最终版本触发一次，不在每次工具编辑时请求。模型调用位于数据库事务外，失败保留回退名，不影响行程保存。写回再次核验版本身份、快照和命名修订号，人工名称优先，过期结果不能覆盖。
+
+### AI 运行草稿与恢复
+
+- `GET /api/plans/:id/drafts` → `{ drafts: PlanDraftItem[] }`。返回该授权规划的全部 `active` / `recoverable` 草稿，按草稿 ID 倒序；已经提交或丢弃的草稿不出现在列表中。
+- 草稿列表项含 `id`、`runId`、`messageId`、`baseVersionId`、`baseRevision`、`revision`、`status`、`resultVersionId`、`createdAt`、`updatedAt`。`baseVersionId` / `resultVersionId` 是数据库版本 ID，可能为 `null`；日期为 ISO 字符串。`revision` 是最近一次草稿写入时的规划修订号，恢复前必须重新读取当前规划获取最新修订号。
+- `GET /api/plans/:id/drafts/:draftId` → `{ draft }`。`draft` 包含上述字段、`planId` 和完整 `plan`，用于查看、比较和确认恢复；允许读取已经处理的草稿状态。不存在、跨用户或跨规划访问返回 404。
+- `POST /api/plans/:id/drafts/:draftId/restore`，请求 `{ expectedRevision: number, expectedVersion?: number, conversationId?: number }`，返回与保存接口兼容的 `{ planId, version, revision, versionId, skipped, preview }`。`expectedRevision` 必填；`conversationId` 若提供，必须属于当前用户和规划。
+- 只有 `recoverable` 草稿可首次恢复；`active` 返回 409。服务端在事务中核验当前规划修订号和可选当前展示版本号，冲突返回 409 并保留草稿。明确恢复将草稿内容作为一次独立手工操作（`source=user`）保存，以恢复时的当前正式版本为父；不静默合并或覆盖并发变化。相同内容返回 `skipped: true`，不刷系统消息。
+- 恢复成功后，草稿转为 `committed`（有内容变化）或 `discarded`（无变化），保存 `resultVersionId`。重复恢复返回原处理结果的版本号与 `skipped: true`；即使之后已有其他成功版本，也不再次切换指针或覆盖当前内容。这种幂等返回不表示所返回版本仍是当前版本，客户端随后重新读取当前规划。
+- `PlanPreview` 增加可选 `draftId` 与 `status: 'draft' | 'recoverable' | 'recovered'`；草稿工具结果外层也带 `draftId`，`versionId` 为 `null`，`version` 是正式基线版本号。旧预览没有上述字段，继续按正式结果读取。正式完成时助手消息的预览和版本引用更新为提交结果；异常终态预览标为 `recoverable`。用户恢复后，原助手消息标为 `recovered` 并引用恢复后的正式版本；原运行仍保持失败/取消/中断状态，不伪装为完整完成。
+- 生成完成时基线冲突：任务状态改为 `failed`、`errorCode='version_conflict'`，草稿保留为 `recoverable`，JSONL 终态也报告失败；不会把完成信号当作覆盖授权。
 
 ### 行程 JSON 扩展
 
@@ -81,11 +102,11 @@
   `@mastra/ai-sdk` `handleChatStream` 输出 AI SDK v5 消息流，再由薄适配层封装为应用 JSONL；Mastra 管理多步工具循环（`maxSteps: 12`）
 - 工具集（均校验 `planId` 作用域）：`get_plan`、`apply_plan_edits`（原子操作数组）、`patch_plan_json`（兜底）、`get_panorama`、`search_poi`；
   工具执行侧维护读取修订号；冲突返回 409 后必须重读。`get_plan` 支持 `section=all|overview|metadata|budget|tips|day|foodJournal|checklist`、`dayIndex`、`offset`、`limit`；分段结果带 `hasMore` / `nextOffset`，不能当成完整数组覆盖。
-- 一轮对话只保留一个版本：同一 `assistantMessageId` 且仍是当前版本时原地更新该版本（diff 对父版本重算），否则追加
-- 工具预览随流返回（`tool-*/output.preview`），在规划提交事务中持久化；文本和工具记录在工具完成、周期检查点和收尾时写回。重启后任务标为 `interrupted`，保留已提交结果，不重新执行工具或续传未保存的 token。
+- 同一 `assistantMessageId` 的多次编辑累计在一个服务端持久化草稿中，工具执行不写正式历史。`finishRun` 保持同步收尾契约，完整完成且基线未发生冲突时，才在同一事务追加一次最终有效结果；最终内容与成功基线相同则不新增正式版本。失败、取消、超时、重启或完成时冲突保留上一成功快照和可恢复草稿。
+- 工具预览随流返回（`tool-*/output.preview`），与草稿在同一事务中持久化；文本和工具记录在工具完成、周期检查点和收尾时写回。草稿预览与正式版本明确区分，不能把预览中的基线版本号当成该草稿的正式版本。重启后任务标为 `interrupted`，部分成果通过草稿接口恢复，不重新执行工具或续传未保存的 token。
 - `requestId` 必填；幂等身份包含用户、规划、会话、规范化消息内容、附件 ID 和本轮实际模型／搜索／思考配置。重复提交同 ID 返回 409，配置或内容不同明确报冲突，不错误复用结果。普通丢响应重试复用 ID；用户明确新一轮才生成新 ID，已提交改动仍保留。
 - `GET /api/chat/runs?conversationId=1` → 最近 20 个授权任务，字段为 `requestId`、`status`、`assistantMessageId`、`planId`、`conversationId`、`steps`、`errorCode`、`startedAt`、`updatedAt`、`finishedAt`。状态为 `queued|running|completed|cancelled|failed|interrupted`。
-- 每轮最多 12 步、服务端总超时 180 秒；输入采用 UTF-8 字节预算，输出 token、用户/全局并发、队列和周期请求额度由 `.env.example` 的 `AI_*` 配置。流建立前输入超预算返回 400；已在流中的工具结果超预算以流错误结束，保留已提交修改。限额/等待超时返回 429 和 `Retry-After`。供应商不提供的 token 用量不推算。
+- 每轮最多 12 步、服务端总超时 180 秒；输入采用 UTF-8 字节预算，输出 token、用户/全局并发、队列和周期请求额度由 `.env.example` 的 `AI_*` 配置。流建立前输入超预算返回 400；已在流中的工具结果超预算以流错误结束，保留可恢复的部分成果和上一成功版本。限额/等待超时返回 429 和 `Retry-After`。供应商不提供的 token 用量不推算。
 - 客户端使用 `@ai-sdk/vue` 的 `Chat` + 扩展 DefaultChatTransport 的 JsonlChatTransport；消息只由 SDK 管理。同规划视图切换保持流，切换会话或规划停止。
 
 ### 模型配置、附件与资源

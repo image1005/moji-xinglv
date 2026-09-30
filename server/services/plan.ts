@@ -7,10 +7,11 @@ import { diffJson, type DiffEntry } from '../../shared/utils/diff'
 import { applyMergePatch } from '../../shared/utils/merge-patch'
 import { stableStringify } from '../../shared/utils/json'
 import { applyPlanEditOps, PlanEditError, type PlanEditOp } from '../../shared/utils/plan-edits'
-import { conversations, messages, plans, planVersions } from '../database/schema'
+import { chatRuns, conversations, messages, plans, planRunDrafts, planVersions } from '../database/schema'
 import { db } from '../utils/db'
 import { finishPage, readPage } from './pagination'
 import { ensurePlanEntityIds } from '../../shared/utils/plan-entities'
+import { fallbackVersionName, scheduleVersionName } from './version-names'
 
 export type PlanRow = typeof plans.$inferSelect
 type VersionRow = typeof planVersions.$inferSelect
@@ -48,17 +49,35 @@ function readCurrentVersion(conn: Reader, row: PlanRow): VersionRow | undefined 
   return readLatestVersion(conn, row.id)
 }
 
-function readSnapshot(conn: Reader, userId: string, planId: number) {
+function readSnapshot(conn: Reader, userId: string, planId: number, messageId?: number | null) {
   const row = readPlan(conn, userId, planId)
-  return {
+  const snapshot = {
     row,
     plan: parsePlanJson(row.planJson),
     latest: readLatestVersion(conn, planId),
     current: readCurrentVersion(conn, row),
   }
+  if (messageId != null) {
+    assertMessageScope(conn, row, { source: 'ai', messageId })
+    const run = conn.select().from(chatRuns).where(and(eq(chatRuns.assistantMessageId, messageId), eq(chatRuns.planId, planId), eq(chatRuns.userId, userId))).get()
+    if (!run || run.status !== 'running') throw createError({ statusCode: 409, statusMessage: '生成任务已结束或不存在，请开始新一轮' })
+    const draft = conn.select().from(planRunDrafts).where(eq(planRunDrafts.runId, run.id)).get()
+    if (draft) {
+      assertDraftBaseline(snapshot, draft)
+      snapshot.plan = parsePlanJson(draft.planJson)
+    }
+  }
+  return snapshot
 }
 
 type Snapshot = ReturnType<typeof readSnapshot>
+type DraftRow = typeof planRunDrafts.$inferSelect
+
+function assertDraftBaseline(snapshot: Snapshot, draft: DraftRow) {
+  if (draft.status !== 'active' || draft.revision !== snapshot.row.revision || draft.baseVersionId !== (snapshot.current?.id ?? null)) {
+    throw createError({ statusCode: 409, statusMessage: '规划已更新，当前生成草稿已保留，请结束本轮后比较并恢复草稿', data: { draftId: draft.id, currentRevision: snapshot.row.revision } })
+  }
+}
 
 function assertVersion(snapshot: Snapshot, expectedVersion?: number, expectedRevision?: number) {
   const currentVersion = snapshot.current?.version ?? 0
@@ -117,8 +136,8 @@ export async function getPlanRow(userId: string, planId: number): Promise<PlanRo
   return readPlan(db, userId, planId)
 }
 
-export async function getPlanSnapshot(userId: string, planId: number) {
-  return db.transaction((tx) => readSnapshot(tx, userId, planId))
+export async function getPlanSnapshot(userId: string, planId: number, messageId?: number) {
+  return db.transaction((tx) => readSnapshot(tx, userId, planId, messageId))
 }
 
 export interface CommitOptions {
@@ -151,6 +170,8 @@ function commitVersion(tx: Transaction, snapshot: Snapshot, next: Plan, opts: Co
     source: opts.source,
     diffJson: diff,
     messageId: opts.messageId ?? null,
+    name: fallbackVersionName(next, current),
+    nameSource: 'fallback',
   }).returning().get()
   tx.update(plans).set({
     planJson: next,
@@ -172,51 +193,28 @@ function commitVersion(tx: Transaction, snapshot: Snapshot, next: Plan, opts: Co
   }
 }
 
-/** 一轮 AI 对话只保留一个版本：同 messageId 且仍是当前版本时原地更新，否则追加。 */
+/** Each running assistant owns one durable checkpoint; completed history is immutable. */
 function commitAiTurn(
   tx: Transaction,
   snapshot: Snapshot,
   next: Plan,
   opts: CommitOptions,
 ) {
-  const { row, plan: current, current: currentVersion } = snapshot
-  const messageId = opts.messageId ?? null
-  const existing = messageId === null
-    ? undefined
-    : tx.select().from(planVersions)
-      .where(and(eq(planVersions.planId, row.id), eq(planVersions.messageId, messageId), eq(planVersions.source, 'ai')))
-      .orderBy(desc(planVersions.version)).limit(1).get()
-  if (existing && currentVersion?.id === existing.id) {
-    const parent = existing.parentVersionId === null
-      ? undefined
-      : tx.select().from(planVersions)
-        .where(and(eq(planVersions.id, existing.parentVersionId), eq(planVersions.planId, row.id))).get()
-    const diff = diffJson(parent?.planJson ?? current, next)
-    tx.update(planVersions).set({ planJson: next, diffJson: diff }).where(eq(planVersions.id, existing.id)).run()
-    tx.update(plans).set({
-      planJson: next,
-      title: next.title,
-      summary: next.summary,
-      coverUrl: next.cover,
-      revision: row.revision + 1,
-      updatedAt: new Date(),
-    }).where(and(eq(plans.id, row.id), eq(plans.userId, row.userId))).run()
-    return {
-      planId: row.id,
-      version: existing.version,
-      revision: row.revision + 1,
-      versionId: existing.id,
-      diff,
-      preview: toPlanPreview(next, row.id, existing.version, 'ai', opts.note),
-      plan: next,
-    }
-  }
-  return commitVersion(tx, snapshot, next, {
-    source: 'ai',
-    messageId,
-    parentVersionId: snapshot.current?.id ?? null,
-    note: opts.note,
-  })
+  if (opts.messageId == null) return commitVersion(tx, snapshot, next, opts)
+  const { row, current } = snapshot
+  const run = tx.select().from(chatRuns).where(and(eq(chatRuns.assistantMessageId, opts.messageId), eq(chatRuns.planId, row.id), eq(chatRuns.userId, row.userId))).get()
+  if (!run || run.status !== 'running') throw createError({ statusCode: 409, statusMessage: '生成任务已结束，请开始新一轮' })
+  const existing = tx.select().from(planRunDrafts).where(eq(planRunDrafts.runId, run.id)).get()
+  if (existing) assertDraftBaseline(snapshot, existing)
+  const revision = row.revision + 1
+  const draft = existing
+    ? tx.update(planRunDrafts).set({ planJson: next, revision, updatedAt: new Date() }).where(eq(planRunDrafts.id, existing.id)).returning().get()!
+    : tx.insert(planRunDrafts).values({ runId: run.id, planId: row.id, messageId: opts.messageId, baseVersionId: current?.id ?? null, baseRevision: row.revision, revision, planJson: next }).returning().get()
+  tx.update(plans).set({ revision }).where(eq(plans.id, row.id)).run()
+  const version = current?.version ?? 0
+  return { planId: row.id, version, revision, versionId: null, draftId: draft.id,
+    diff: diffJson(snapshot.plan, next), plan: next,
+    preview: { ...toPlanPreview(next, row.id, version, 'ai', opts.note ?? '生成中，尚未提交正式版本'), draftId: draft.id, status: 'draft' as const } }
 }
 
 export interface ApplyEditsOptions {
@@ -226,7 +224,7 @@ export interface ApplyEditsOptions {
   expectedRevision?: number
 }
 
-function assertMessageScope(tx: Transaction, row: PlanRow, opts: CommitOptions) {
+function assertMessageScope(tx: Reader, row: PlanRow, opts: CommitOptions) {
   if (opts.conversationId !== undefined) {
     const conversation = tx.select({ id: conversations.id }).from(conversations).where(and(
       eq(conversations.id, opts.conversationId), eq(conversations.planId, row.id), eq(conversations.userId, row.userId),
@@ -262,10 +260,13 @@ function commitMutation(tx: Transaction, snapshot: Snapshot, next: Plan, opts: C
   }
   const unchanged = stableStringify(snapshot.plan) === stableStringify(next)
   const version = snapshot.current?.version ?? 0
+  const draft = opts.source === 'ai' && opts.messageId != null
+    ? tx.select().from(planRunDrafts).where(and(eq(planRunDrafts.planId, snapshot.row.id), eq(planRunDrafts.messageId, opts.messageId), eq(planRunDrafts.status, 'active'))).get() : undefined
   const result = unchanged ? {
     planId: snapshot.row.id, version, revision: snapshot.row.revision, versionId: snapshot.current?.id ?? null,
     diff: [] as DiffEntry[], preview: toPlanPreview(next, snapshot.row.id, version, opts.source, opts.note ?? '内容无变化，未生成新版本'),
     plan: next, skipped: true,
+    ...(draft ? { versionId: null, draftId: draft.id, preview: { ...toPlanPreview(next, snapshot.row.id, version, 'ai', '草稿内容无变化'), draftId: draft.id, status: 'draft' as const } } : {}),
   } : { ...(opts.source === 'ai' ? commitAiTurn(tx, snapshot, next, opts) : commitVersion(tx, snapshot, next, opts)), skipped: false }
   if (opts.source === 'ai' && opts.messageId != null) {
     tx.update(messages).set({ previewJson: result.preview, planVersionId: result.versionId }).where(eq(messages.id, opts.messageId)).run()
@@ -288,8 +289,8 @@ export async function applyPlanEdits(
   edits: readonly PlanEditOp[],
   opts: ApplyEditsOptions = {},
 ) {
-  return db.transaction((tx) => {
-    const snapshot = readSnapshot(tx, userId, planId)
+  const result = db.transaction((tx) => {
+    const snapshot = readSnapshot(tx, userId, planId, opts.messageId)
     assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     let next: Plan
     try {
@@ -300,6 +301,8 @@ export async function applyPlanEdits(
     }
     return commitMutation(tx, snapshot, next, { ...opts, source: 'ai' })
   }, { behavior: 'immediate' })
+  if (!result.skipped && result.versionId) scheduleVersionName(userId, planId, result.versionId)
+  return result
 }
 
 export async function createPlan(
@@ -309,7 +312,7 @@ export async function createPlan(
 ) {
   const plan = parsePlanJson(input)
   const source = opts.source ?? 'ai'
-  return db.transaction((tx) => {
+  const result = db.transaction((tx) => {
     const row = tx.insert(plans).values({
       userId,
       title: plan.title,
@@ -326,6 +329,7 @@ export async function createPlan(
       source,
       diffJson: null,
       messageId: opts.messageId ?? null,
+      name: fallbackVersionName(plan), nameSource: 'fallback',
     }).returning().get()
     tx.update(plans).set({ currentVersionId: versionRow.id }).where(eq(plans.id, row.id)).run()
     return {
@@ -338,6 +342,8 @@ export async function createPlan(
       preview: toPlanPreview(plan, row.id, 1, source),
     }
   }, { behavior: 'immediate' })
+  scheduleVersionName(userId, result.planId, result.versionId)
+  return result
 }
 
 /** 读、合并、版本比较与写入在同一事务内，防止数组 patch 覆盖并发修改。 */
@@ -345,12 +351,14 @@ export async function patchPlan(userId: string, planId: number, patch: unknown, 
   if (typeof patch !== 'object' || patch === null || Array.isArray(patch)) {
     throw createError({ statusCode: 400, statusMessage: 'patch 必须是对象（RFC 7396 Merge Patch）' })
   }
-  return db.transaction((tx) => {
-    const snapshot = readSnapshot(tx, userId, planId)
+  const result = db.transaction((tx) => {
+    const snapshot = readSnapshot(tx, userId, planId, opts.source === 'ai' ? opts.messageId : undefined)
     assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     const next = parsePlanJson(applyMergePatch(snapshot.plan, patch), snapshot.plan)
     return commitMutation(tx, snapshot, next, opts)
   }, { behavior: 'immediate' })
+  if (!result.skipped && result.versionId) scheduleVersionName(userId, planId, result.versionId)
+  return result
 }
 
 export async function listVersions(userId: string, planId: number, limit = 50) {
@@ -363,6 +371,7 @@ export async function listVersions(userId: string, planId: number, limit = 50) {
     messageId: planVersions.messageId,
     createdAt: planVersions.createdAt,
     diffJson: planVersions.diffJson,
+    name: planVersions.name, nameSource: planVersions.nameSource, nameRevision: planVersions.nameRevision,
   }).from(planVersions).where(eq(planVersions.planId, planId))
     .orderBy(desc(planVersions.version)).limit(limit)
 }
@@ -374,6 +383,7 @@ export async function listVersionsPage(userId: string, planId: number, options: 
     id: planVersions.id, version: planVersions.version, source: planVersions.source,
     parentVersionId: planVersions.parentVersionId, messageId: planVersions.messageId,
     createdAt: planVersions.createdAt, diffJson: planVersions.diffJson,
+    name: planVersions.name, nameSource: planVersions.nameSource, nameRevision: planVersions.nameRevision,
   }).from(planVersions).where(and(eq(planVersions.planId, planId), page.cursor ? lt(planVersions.version, page.cursor.sort) : undefined))
     .orderBy(desc(planVersions.version)).limit(page.limit + 1)
   return finishPage(rows, page, (row) => ({ sort: row.version, id: row.id }))
@@ -423,7 +433,7 @@ export async function switchToVersion(
       preview: toPlanPreview(next, planId, target.version, 'rollback', `已切换到 v${version}，历史版本保留`),
       plan: next,
     }
-    appendSystemMessage(tx, opts.conversationId, result, `已切换到 v${result.version}（不新建版本，历史版本保留）`)
+    if (changed) appendSystemMessage(tx, opts.conversationId, result, `已切换到 v${result.version}（不新建版本，历史版本保留）`)
     return result
   }, { behavior: 'immediate' })
 }
@@ -443,7 +453,7 @@ export async function updatePlanMeta(
     expectedRevision?: number
   },
 ) {
-  return db.transaction((tx) => {
+  const result = db.transaction((tx) => {
     const snapshot = readSnapshot(tx, userId, planId)
     assertVersion(snapshot, meta.expectedVersion, meta.expectedRevision)
     const next = parsePlanJson({
@@ -463,6 +473,8 @@ export async function updatePlanMeta(
     }
     return { ...readPlan(tx, userId, planId), version: result.version, plan: next, skipped: result.skipped && !contentChanged }
   }, { behavior: 'immediate' })
+  if (!result.skipped && result.currentVersionId) scheduleVersionName(userId, planId, result.currentVersionId)
+  return result
 }
 
 /** 内容未变不追加版本，但仍先检查客户端版本。 */
@@ -471,14 +483,87 @@ export async function savePlanVersion(
   planId: number,
   opts: CommitOptions & { planJson?: unknown },
 ) {
-  return db.transaction((tx) => {
-    const snapshot = readSnapshot(tx, userId, planId)
+  const result = db.transaction((tx) => {
+    const snapshot = readSnapshot(tx, userId, planId, opts.source === 'ai' ? opts.messageId : undefined)
     assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
     const next = opts.planJson === undefined ? snapshot.plan : parsePlanJson(opts.planJson, snapshot.plan)
     const result = commitMutation(tx, snapshot, next, opts)
-    appendSystemMessage(tx, opts.conversationId, result, result.skipped ? '内容无变化，未生成新版本' : `已保存为 v${result.version}`)
+    if (!result.skipped && result.versionId) appendSystemMessage(tx, opts.conversationId, result, `已保存为 v${result.version}`)
     return result
   }, { behavior: 'immediate' })
+  if (!result.skipped && result.versionId) scheduleVersionName(userId, planId, result.versionId)
+  return result
+}
+
+/** Called inside the synchronous run-finalization transaction; no provider requests here. */
+export function finalizePlanRun(tx: Transaction, run: typeof chatRuns.$inferSelect, completed: boolean) {
+  const draft = tx.select().from(planRunDrafts).where(and(eq(planRunDrafts.runId, run.id), eq(planRunDrafts.planId, run.planId), eq(planRunDrafts.messageId, run.assistantMessageId ?? -1))).get()
+  if (!draft || draft.status !== 'active') return null
+  if (!completed) {
+    tx.update(planRunDrafts).set({ status: 'recoverable', updatedAt: new Date() }).where(eq(planRunDrafts.id, draft.id)).run()
+    tx.update(messages).set({ previewJson: { ...toPlanPreview(parsePlanJson(draft.planJson), run.planId,
+      draft.baseVersionId ? tx.select().from(planVersions).where(eq(planVersions.id, draft.baseVersionId)).get()?.version ?? 0 : 0,
+      'ai', '本轮未完成，部分成果已保留为恢复草稿'), draftId: draft.id, status: 'recoverable' }, planVersionId: null }).where(eq(messages.id, draft.messageId)).run()
+    return null
+  }
+  const snapshot = readSnapshot(tx, run.userId, run.planId)
+  assertDraftBaseline(snapshot, draft)
+  const next = parsePlanJson(draft.planJson, snapshot.plan)
+  const unchanged = stableStringify(next) === stableStringify(snapshot.plan)
+  const result = unchanged
+    ? { versionId: snapshot.current?.id ?? null, preview: toPlanPreview(next, run.planId, snapshot.current?.version ?? 0, 'ai', '内容无变化，未生成新版本') }
+    : commitVersion(tx, snapshot, next, { source: 'ai', messageId: draft.messageId, expectedRevision: draft.revision })
+  tx.update(messages).set({ previewJson: result.preview, planVersionId: result.versionId }).where(eq(messages.id, draft.messageId)).run()
+  tx.update(planRunDrafts).set({ status: unchanged ? 'discarded' : 'committed', resultVersionId: result.versionId, updatedAt: new Date() }).where(eq(planRunDrafts.id, draft.id)).run()
+  return unchanged ? null : result.versionId
+}
+
+function readDraft(conn: Reader, userId: string, planId: number, draftId: number) {
+  readPlan(conn, userId, planId)
+  const draft = conn.select().from(planRunDrafts).where(and(eq(planRunDrafts.id, draftId), eq(planRunDrafts.planId, planId))).get()
+  if (!draft) throw createError({ statusCode: 404, statusMessage: '恢复草稿不存在' })
+  return draft
+}
+
+export function listPlanDrafts(userId: string, planId: number) {
+  readPlan(db, userId, planId)
+  return db.select({ id: planRunDrafts.id, runId: planRunDrafts.runId, messageId: planRunDrafts.messageId,
+    baseVersionId: planRunDrafts.baseVersionId, baseRevision: planRunDrafts.baseRevision, revision: planRunDrafts.revision,
+    status: planRunDrafts.status, resultVersionId: planRunDrafts.resultVersionId,
+    createdAt: planRunDrafts.createdAt, updatedAt: planRunDrafts.updatedAt,
+  }).from(planRunDrafts).where(and(eq(planRunDrafts.planId, planId), inArray(planRunDrafts.status, ['active', 'recoverable']))).orderBy(desc(planRunDrafts.id)).all()
+}
+
+export function getPlanDraft(userId: string, planId: number, draftId: number) {
+  const { planJson, ...draft } = readDraft(db, userId, planId, draftId)
+  return { ...draft, plan: parsePlanJson(planJson) }
+}
+
+/** Explicit recovery is a separate user operation, with its own optimistic concurrency check. */
+export async function restorePlanDraft(userId: string, planId: number, draftId: number,
+  opts: { expectedRevision: number; expectedVersion?: number; conversationId?: number },
+) {
+  const result = db.transaction(tx => {
+    const draft = readDraft(tx, userId, planId, draftId)
+    const snapshot = readSnapshot(tx, userId, planId)
+    assertMessageScope(tx, snapshot.row, { ...opts, source: 'user' })
+    if ((draft.status === 'committed' || draft.status === 'discarded') && draft.resultVersionId) {
+      const version = tx.select().from(planVersions).where(and(eq(planVersions.id, draft.resultVersionId), eq(planVersions.planId, planId))).get()!
+      const plan = parsePlanJson(version.planJson)
+      return { planId, version: version.version, versionId: version.id, revision: snapshot.row.revision, skipped: true,
+        preview: toPlanPreview(plan, planId, version.version, 'user', '该草稿已处理，未重复恢复'), plan }
+    }
+    if (draft.status !== 'recoverable') throw createError({ statusCode: 409, statusMessage: '草稿仍在生成或已处理，请刷新后重试' })
+    assertVersion(snapshot, opts.expectedVersion, opts.expectedRevision)
+    const next = parsePlanJson(draft.planJson, snapshot.plan)
+    const saved = commitMutation(tx, snapshot, next, { ...opts, source: 'user', note: '用户确认恢复未完成草稿' })
+    tx.update(planRunDrafts).set({ status: saved.skipped ? 'discarded' : 'committed', resultVersionId: saved.versionId, updatedAt: new Date() }).where(eq(planRunDrafts.id, draft.id)).run()
+    tx.update(messages).set({ previewJson: { ...saved.preview, draftId: draft.id, status: 'recovered', message: `未完成草稿已由用户确认恢复至 v${saved.version}` }, planVersionId: saved.versionId }).where(eq(messages.id, draft.messageId)).run()
+    if (!saved.skipped) appendSystemMessage(tx, opts.conversationId, saved, `已将未完成草稿恢复为 v${saved.version}`)
+    return saved
+  }, { behavior: 'immediate' })
+  if (!result.skipped && result.versionId) scheduleVersionName(userId, planId, result.versionId)
+  return result
 }
 
 export async function deletePlan(userId: string, planId: number) {

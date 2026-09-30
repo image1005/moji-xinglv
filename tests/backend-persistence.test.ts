@@ -11,7 +11,7 @@ it.each([
   ['serialPatches', '无显式版本的并发 patch 不丢失彼此字段'],
   ['metadataSwitch', '元数据与 JSON 和版本一致并支持指针式切换'],
   ['switchBranches', '切换版本不新建版本并在继续编辑时形成分叉'],
-  ['applyEditsTurn', '原子编辑可跨调用合并为单版本并在指针移动后追加'],
+  ['applyEditsTurn', '同轮原子编辑只持久化草稿，完成提交一次且拒绝迟到工具'],
   ['unknownFieldRejected', '未知字段被拒绝且不产生版本'],
   ['metaExtensions', '封面标签提示预算扩展可往返且无变化不追加版本'],
   ['scope', '拒绝跨用户规划与跨规划父版本'],
