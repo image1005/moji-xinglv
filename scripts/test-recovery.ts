@@ -194,11 +194,15 @@ try {
       const tasks = await json<Run[]>(`/api/chat/runs?conversationId=${conversationId}`)
       const assistant = detail.messages.find(message => message.role === 'assistant')
       const currentDrafts = await drafts()
-      if (state.holding && tasks[0]?.status === 'running' && assistant?.preview?.summary === marker && currentDrafts[0]?.status === 'active') {
+      const pendingDraft = currentDrafts[0]
+      // 本轮读取跨多个请求，plans 与 drafts 可能分别落在草稿事务提交前后；
+      // 只有两处 revision 对齐时，current 才是与该活动草稿同一时刻的快照。
+      if (state.holding && tasks[0]?.status === 'running' && assistant?.preview?.summary === marker
+        && pendingDraft?.status === 'active' && current.revision === pendingDraft.revision) {
         beforePlan = current
         beforeMessages = detail.messages
         beforeVersions = await versions()
-        activeDraft = await draftDetail(currentDrafts[0].id)
+        activeDraft = await draftDetail(pendingDraft.id)
         assert.equal(activeDraft.plan?.summary, marker)
         assert.equal(assistant.preview.status, 'draft')
         assert.equal(assistant.preview.draftId, activeDraft.id)
@@ -211,7 +215,7 @@ try {
     assert(committed, '未观察到活动草稿已持久化且任务仍在运行的边界')
     assert.equal(beforePlan!.version, baseline.version)
     assert.deepEqual(beforePlan!.plan, baseline.plan)
-    assert(beforePlan!.revision > baseline.revision)
+    assert(beforePlan!.revision > baseline.revision, `草稿阶段应推进 revision：baseline=${baseline.revision} before=${beforePlan!.revision} version=${beforePlan!.version}/${baseline.version}`)
     assert.equal(beforeMessages.length, 2)
     assert.equal(beforeVersions.length, 1)
     assert.deepEqual((await historicalPlan(1)).plan, baseline.plan)
