@@ -43,6 +43,13 @@
       "when": 1789739324076,
       "tag": "0005_attachment_links_backfill",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1790731084355,
+      "tag": "0006_legal_mole_man",
+      "breakpoints": true
     }
   ]
 }

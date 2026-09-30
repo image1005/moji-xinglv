@@ -24,7 +24,7 @@ export function createPlanTools(ctx: ToolContext) {
   let mustRead = false
   async function expectedRevision() {
     if (mustRead) throw createError({ statusCode: 409, statusMessage: '规划已更新，请先用 get_plan 重读相关内容后再编辑' })
-    if (revision === undefined) revision = (await getPlanSnapshot(ctx.userId, ctx.planId)).row.revision
+    if (revision === undefined) revision = (await getPlanSnapshot(ctx.userId, ctx.planId, ctx.assistantMessageId)).row.revision
     return revision
   }
   function ensureScope(planId: number) {
@@ -53,7 +53,7 @@ export function createPlanTools(ctx: ToolContext) {
     outputSchema: z.object({ ok: z.literal(true), planId: scope, version: z.number().int(), revision: z.number().int(), plan: PlanSchema.optional() }).passthrough(),
     execute: ({ planId, section, dayIndex, offset, limit }) => guard(async () => {
       ensureScope(planId)
-      const { plan, current, row } = await getPlanSnapshot(ctx.userId, planId)
+      const { plan, current, row } = await getPlanSnapshot(ctx.userId, planId, ctx.assistantMessageId)
       revision = row.revision
       mustRead = false
       return { ok: true as const, planId, version: current?.version ?? 0, revision, ...selectPlanContext(plan, section ?? 'all', dayIndex, offset, limit) }
@@ -78,6 +78,7 @@ export function createPlanTools(ctx: ToolContext) {
         version: result.version,
         revision: result.revision,
         versionId: result.versionId,
+        draftId: 'draftId' in result ? result.draftId : undefined,
         changed: result.diff.length,
         skipped: result.skipped,
         preview: result.preview,
@@ -102,6 +103,7 @@ export function createPlanTools(ctx: ToolContext) {
         version: result.version,
         revision: result.revision,
         versionId: result.versionId,
+        draftId: 'draftId' in result ? result.draftId : undefined,
         changed: result.diff.length,
         skipped: result.skipped,
         preview: result.preview,

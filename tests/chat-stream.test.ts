@@ -23,11 +23,15 @@ const mocks = vi.hoisted(() => ({
   where: vi.fn(),
   select: vi.fn(),
   versionGet: vi.fn(),
+  draftGet: vi.fn(), terminalStatus: vi.fn(),
   claimRun: vi.fn(), finishRun: vi.fn(), checkpointRun: vi.fn(),
 }))
 
 vi.mock('@mastra/ai-sdk', () => ({ handleChatStream: mocks.handleChatStream }))
-vi.mock('../server/services/chat-jsonl', () => ({ jsonlChatResponse: (stream: unknown) => mocks.createUIMessageStreamResponse({ stream }) }))
+vi.mock('../server/services/chat-jsonl', () => ({ jsonlChatResponse: (stream: unknown, _identity: unknown, status: unknown) => {
+  mocks.terminalStatus(status)
+  return mocks.createUIMessageStreamResponse({ stream })
+} }))
 vi.mock('../server/services/model-settings', () => ({ resolveModelConfiguration: async () => ({ model: 'test-model', webSearch: false, thinking: 'off' }) }))
 vi.mock('../server/services/attachments', () => ({ resolveAttachments: async () => [], attachmentModelParts: async () => [] }))
 vi.mock('../server/providers/models', () => ({ modelCapabilities: () => ({ vision: false }) }))
@@ -146,11 +150,17 @@ beforeEach(() => {
   mocks.set.mockReturnValue({ where: mocks.where })
   mocks.where.mockResolvedValue(undefined)
   mocks.versionGet.mockReturnValue({ id: 202, planId, version: 2 })
-  mocks.select.mockReturnValue({ from: () => ({
-    where: (condition: SQL) => ({
+  mocks.select.mockReturnValue({ from: () => {
+    const where = (condition: SQL) => ({
       get: () => {
         // 用真实 Drizzle SQL 验证三重过滤，不把其他规划的行伪装成查询命中。
         const query = new SQLiteSyncDialect().sqlToQuery(condition)
+        if (query.sql.includes('"plan_run_drafts"')) {
+          const draft = mocks.draftGet() as { id: number; planId: number; runId: number; messageId: number; status: string; revision: number; baseRevision: number; version: number } | undefined
+          for (const column of ['id', 'plan_id', 'run_id', 'message_id', 'status', 'revision', 'base_revision']) expect(query.sql).toContain(`"plan_run_drafts"."${column}"`)
+          return draft && [draft.id, draft.planId, draft.runId, draft.messageId, draft.status].every((value, index) => value === query.params[index])
+            && draft.revision >= Number(query.params[5]) && draft.baseRevision < Number(query.params[6]) ? draft : undefined
+        }
         const row = mocks.versionGet() as { id: number; planId: number; version: number } | undefined
         if (!row) return undefined
         expect(query.sql).toContain('"plan_versions"."id"')
@@ -159,8 +169,9 @@ beforeEach(() => {
         return row.id === query.params[0] && row.planId === query.params[1] && row.version === query.params[2]
           ? row : undefined
       },
-    }),
-  }) })
+    })
+    return { where, leftJoin: () => ({ where }) }
+  } })
 })
 
 afterEach(async () => {
@@ -318,6 +329,35 @@ describe('工具输出必须关联已知调用与当前规划版本', () => {
     type: 'tool-input-available', toolCallId: 'known-call', toolName: 'patch_plan_json',
     input: { planId, patch: { summary: '本次变更' } },
   }
+
+  it.each([3, 4])('转发当前任务的合法草稿，包括后续工具已将检查点推进到修订%d的延迟输出', async revision => {
+    mocks.draftGet.mockReturnValue({ id: 9, planId, runId: 1, messageId: 102, status: 'active', revision, baseRevision: 1, version: 1 })
+    const output = { ok: true, version: 1, revision: 3, versionId: null, draftId: 9,
+      preview: { ...preview, version: 1, title: '真实草稿', draftId: 9, status: 'draft' } }
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([input, { type: 'tool-output-available', toolCallId: 'known-call', output }]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.find(chunk => chunk.type === 'tool-output-available')?.output).toEqual(output)
+    expect(mocks.finishRun).toHaveBeenCalledWith(1, 'completed', undefined)
+  })
+
+  it.each([
+    { planId: 999 }, { runId: 2 }, { messageId: 888 }, { status: 'recoverable' }, { revision: 2 }, { baseRevision: 3 }, { version: 7 },
+  ])('拒绝不属于当前工具检查点的草稿 %j', async changes => {
+    mocks.draftGet.mockReturnValue({ id: 9, planId, runId: 1, messageId: 102, status: 'active', revision: 3, baseRevision: 1, version: 1, ...changes })
+    mocks.handleChatStream.mockResolvedValueOnce(finiteUpstream([input, { type: 'tool-output-available', toolCallId: 'known-call',
+      output: { ok: true, version: 1, revision: 3, versionId: null, draftId: 9, preview: { ...preview, version: 1, draftId: 9, status: 'draft' } } }]))
+    const forwarded = await drain(await (await handler())({}))
+    expect(forwarded.some(chunk => chunk.type === 'tool-output-error')).toBe(true)
+    expect(forwarded.some(chunk => chunk.type === 'tool-output-available')).toBe(false)
+  })
+
+  it('终态提交冲突时数据库与JSONL均为failed并保存恢复提示', async () => {
+    mocks.finishRun.mockReturnValue('failed')
+    await drain(await (await handler())({}))
+    const status = mocks.terminalStatus.mock.calls[0]![0] as () => string
+    expect(status()).toBe('failed')
+    expect(persisted().content).toContain('恢复草稿')
+  })
 
   it.each([
     ['未知 toolCallId', 'unknown-call', preview, 202, { id: 202, planId, version: 2 }],

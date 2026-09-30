@@ -1,23 +1,14 @@
 import assert from 'node:assert/strict'
-import { Database } from 'bun:sqlite'
 import { mock } from 'bun:test'
-import { drizzle } from 'drizzle-orm/bun-sqlite'
-import { eq, sql } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import * as schema from '../server/database/schema'
 import { emptyPlan } from '../shared/schemas/plan'
+import { createMigratedTestDb } from './helpers/migrated-db'
 
-// Bun-only memory connection; this fixture never imports the real db.ts or .env.
-const sqlite = new Database(':memory:')
-const db = drizzle(sqlite, { schema })
-for (const ddl of [
-  "CREATE TABLE plans (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', content_md TEXT NOT NULL DEFAULT '', plan_json TEXT NOT NULL, cover_url TEXT NOT NULL DEFAULT '', current_version_id INTEGER, revision INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)",
-  'CREATE TABLE plan_versions (id INTEGER PRIMARY KEY, plan_id INTEGER NOT NULL, version INTEGER NOT NULL, plan_json TEXT NOT NULL, created_by TEXT, created_at INTEGER NOT NULL, parent_version_id INTEGER, source TEXT NOT NULL, diff_json TEXT, message_id INTEGER, UNIQUE(plan_id, version))',
-  'CREATE TABLE conversations (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, plan_id INTEGER NOT NULL, title TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL)',
-  'CREATE TABLE messages (id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL, role TEXT NOT NULL, content TEXT NOT NULL, tool_calls TEXT, parts_json TEXT, preview_json TEXT, plan_version_id INTEGER, created_at INTEGER NOT NULL)',
-  'CREATE TABLE chat_runs (id INTEGER PRIMARY KEY, user_id TEXT NOT NULL, request_id TEXT NOT NULL, request_hash TEXT NOT NULL, configuration_json TEXT, plan_id INTEGER NOT NULL, conversation_id INTEGER NOT NULL, assistant_message_id INTEGER, status TEXT NOT NULL, steps INTEGER NOT NULL DEFAULT 0, error_code TEXT, started_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, finished_at INTEGER, UNIQUE(user_id, request_id))',
-  "CREATE TABLE usage_metrics (id INTEGER PRIMARY KEY, day TEXT NOT NULL, user_id TEXT NOT NULL DEFAULT '', service TEXT NOT NULL, requests INTEGER NOT NULL DEFAULT 0, errors INTEGER NOT NULL DEFAULT 0, cache_hits INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, input_tokens INTEGER NOT NULL DEFAULT 0, output_tokens INTEGER NOT NULL DEFAULT 0, usage_samples INTEGER NOT NULL DEFAULT 0, steps INTEGER NOT NULL DEFAULT 0, UNIQUE(day,user_id,service))",
-]) db.run(sql.raw(ddl))
+// Bun-only migrated memory connection; this fixture never imports the real db.ts or .env.
+const { sqlite, db } = createMigratedTestDb()
 mock.module('../server/utils/db', () => ({ db, sqlite, schema }))
+process.env.AI_API_KEY = ''
 const runs = await import('../server/services/chat-runs')
 const metrics = await import('../server/services/metrics')
 const planService = await import('../server/services/plan')
@@ -95,13 +86,17 @@ const cases: Record<string, () => Promise<void>> = {
     runs.attachRunMessage(task.id, assistant.id)
     const edit = await planService.applyPlanEdits('owner', plan.planId, [{ target: 'day', action: 'add', value: { city: '杭州' } }], { messageId: assistant.id, expectedRevision: 1 })
     runs.checkpointRun(task.id, 1)
-    // No stream output/finalization has occurred: the version transaction is the recovery record.
+    // No stream output/finalization has occurred: the draft transaction is the recovery record.
     const committed = db.select().from(messages).where(eq(messages.id, assistant.id)).get()!
     assert.equal(committed.planVersionId, edit.versionId)
     assert.deepEqual(committed.previewJson, JSON.parse(JSON.stringify(edit.preview)))
     assert.equal(runs.recoverInterruptedRuns(), 1)
     const recovered = db.select().from(messages).where(eq(messages.id, assistant.id)).get()!
-    assert.deepEqual(recovered.previewJson, JSON.parse(JSON.stringify(edit.preview)))
+    assert.equal((recovered.previewJson as { status: string }).status, 'recoverable')
+    assert.equal((recovered.previewJson as { draftId: number }).draftId, edit.draftId)
+    assert.equal(recovered.planVersionId, null)
+    assert.equal((await planService.getPlanSnapshot('owner', plan.planId)).plan.days.length, 0)
+    assert.equal((await planService.listPlanDrafts('owner', plan.planId)).length, 1)
     assert.match(recovered.content, /已生成的部分文字/)
     assert.match(recovered.content, /服务重启中断/)
     assert.equal(runs.listRuns('owner', conversation.id)[0]!.status, 'interrupted')
