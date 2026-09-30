@@ -30,6 +30,9 @@ jobs:
         run: bun run check
       - name: 历史迁移、附件权限与媒体修订隔离验证
         run: bun run verify:media
+        env:
+          # CI 使用非官方网关地址，思考档位必须显式声明才可通过模型配置校验
+          AI_DEEPSEEK_THINKING_LEVELS: off,light,standard,deep
       - name: 构建生产产物
         run: bun run build
       - name: 隔离数据库 HTTP 验收
